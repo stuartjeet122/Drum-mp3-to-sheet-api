@@ -1,0 +1,1 @@
+"""CPU inference adapters for transcription models."""

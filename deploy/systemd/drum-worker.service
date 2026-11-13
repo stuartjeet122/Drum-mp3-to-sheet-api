@@ -1,0 +1,43 @@
+[Unit]
+Description=CPU-only Automatic Drum Transcription Celery worker
+After=network.target redis-server.service
+Wants=redis-server.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=drum-api
+Group=drum-api
+WorkingDirectory=/opt/drum-transcription
+EnvironmentFile=-/opt/drum-transcription/.env
+Environment="PATH=/opt/drum-transcription/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+Environment="QT_QPA_PLATFORM=offscreen"
+Environment="XDG_CACHE_HOME=/var/cache/drum-transcription"
+Environment="XDG_CONFIG_HOME=/var/cache/drum-transcription/config"
+Environment="XDG_DATA_HOME=/var/cache/drum-transcription/data"
+Environment="NUMBA_CACHE_DIR=/var/cache/drum-transcription/numba"
+ExecStart=/opt/drum-transcription/.venv/bin/celery -A backend.app.workers.celery_app:celery_app worker --pool=prefork --loglevel=info --concurrency=1 -Q celery
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=90
+KillMode=control-group
+OOMPolicy=kill
+MemoryAccounting=true
+MemoryHigh=5G
+MemoryMax=6G
+MemorySwapMax=0
+OOMScoreAdjust=500
+TasksMax=256
+UMask=0027
+CacheDirectory=drum-transcription
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/drum-transcription/storage
+
+[Install]
+WantedBy=multi-user.target

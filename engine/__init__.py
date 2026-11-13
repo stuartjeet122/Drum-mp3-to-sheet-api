@@ -1,0 +1,1 @@
+"""Pure audio and notation logic, independent of backend infrastructure."""

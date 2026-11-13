@@ -1,0 +1,82 @@
+name: drum-transcription
+
+x-application: &application
+  image: drum-transcription:local
+  build: .
+  restart: unless-stopped
+  init: true
+  user: "10001:10001"
+  volumes:
+    - ./storage:/app/storage
+    - ./models:/app/models:ro
+  environment:
+    REDIS_URL: redis://redis:6379/0
+    CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
+    QT_QPA_PLATFORM: offscreen
+  depends_on:
+    redis:
+      condition: service_healthy
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:size=134217728,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction", "--save", ""]
+    volumes:
+      - redis-data:/data
+    mem_limit: 192m
+    memswap_limit: 192m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+  api:
+    <<: *application
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=10).read()"]
+      interval: 30s
+      timeout: 12s
+      start_period: 60s
+      retries: 3
+  worker:
+    <<: *application
+    command: ["celery", "-A", "backend.app.workers.celery_app:celery_app", "worker", "--pool=prefork", "--loglevel=info", "--concurrency=1", "-Q", "celery"]
+    mem_limit: 6g
+    memswap_limit: 6g
+    mem_reservation: 5g
+    oom_score_adj: 500
+    pids_limit: 256
+    stop_grace_period: 90s
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 5G
+
+volumes:
+  redis-data:

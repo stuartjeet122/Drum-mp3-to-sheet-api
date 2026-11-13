@@ -1,0 +1,40 @@
+[Unit]
+Description=Automatic Drum Transcription HTTP API
+After=network.target redis-server.service
+Wants=redis-server.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=drum-api
+Group=drum-api
+WorkingDirectory=/opt/drum-transcription
+EnvironmentFile=-/opt/drum-transcription/.env
+Environment="PATH=/opt/drum-transcription/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+Environment="QT_QPA_PLATFORM=offscreen"
+Environment="XDG_CACHE_HOME=/var/cache/drum-transcription"
+Environment="XDG_CONFIG_HOME=/var/cache/drum-transcription/config"
+Environment="NUMBA_CACHE_DIR=/var/cache/drum-transcription/numba"
+ExecStart=/opt/drum-transcription/.venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --workers 2
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=45
+KillMode=control-group
+OOMPolicy=kill
+MemoryAccounting=true
+MemoryMax=1G
+MemorySwapMax=0
+TasksMax=128
+UMask=0027
+CacheDirectory=drum-transcription
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/drum-transcription/storage
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+# Ubuntu x86_64, Python 3.11-3.13. Exact top-level pins; not a transitive hash lock.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+python-multipart==0.0.33
+pydantic==2.14.3
+pydantic-settings==2.16.2
+filelock==3.32.7
+celery[redis]==5.5.3
+redis==5.2.1
+
+numpy==2.2.6
+scipy==1.15.3
+librosa==0.11.0
+soundfile==0.13.1
+audioread==3.1.0
+
+# The local +cpu version is mandatory: a plain torch pin can select CUDA builds.
+# torchaudio 2.11.1 declares torch>=2.11; validate both imports on the target CPU.
+torch==2.15.0+cpu
+torchaudio==2.11.1+cpu
+onnxruntime==1.23.2
+# Verified upstream API/label ordering. Git is required; deploy model paths separately.
+# Review the upstream/model licenses before redistributing its bundled checkpoint.
+adtof-pytorch @ git+https://github.com/xavriley/ADTOF-pytorch.git@85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9
+
+pretty_midi==0.2.10
+music21==9.7.1
+lxml==6.1.3
+pytest==9.2.0
+httpx==0.28.1
