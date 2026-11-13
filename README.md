@@ -7,8 +7,8 @@ fusion, rhythm quantization, and notation exports without backend framework depe
 The engine pipeline and Celery tasks connect these stages with persisted progress.
 
 For the resource-capped M73 production installation, use
-[the deployment runbook](deploy/README.md): native Ubuntu systemd is recommended,
-with a multi-stage Docker/Compose alternative and a real end-to-end smoke client.
+[the deployment runbook](deploy/README.md): native Ubuntu systemd deployment
+with a real end-to-end smoke client.
 `requirements.txt` pins CPU-only production dependencies; `pyproject.toml`
 retains version ranges for development.
 
@@ -20,9 +20,6 @@ Generated environments, caches, and installed package metadata are excluded.
 .
 |-- .env.example
 |-- .gitignore
-|-- .dockerignore
-|-- Dockerfile
-|-- docker-compose.yml
 |-- requirements.txt
 |-- pyproject.toml
 |-- README.md
@@ -133,14 +130,20 @@ python -m pip install -e '.[test]'
 ```
 
 If activation is restricted, invoke `.venv/Scripts/python.exe` directly.
-No `.env` file is required. Only two optional settings are read from the
+No `.env` file is required. Four optional settings are read from the
 environment or an optional `.env` in the working directory. Real environment
 variables take precedence. Their defaults are:
 
 ```dotenv
 REDIS_URL=redis://localhost:6379/0
 CORS_ORIGINS=["http://localhost:3000"]
+APP_STORAGE_DIR=storage
+APP_MODELS_DIR=models
 ```
+
+Cockpit App Manager supplies the two `APP_*` paths automatically for managed
+Python services. See [the Cockpit setup](deploy/README.md#cockpit-app-manager)
+for per-project virtual environments, workers and persistent files.
 
 Add your actual Next.js origin to `CORS_ORIGINS`. Origins may not contain
 wildcards, credentials, paths, or query strings.
@@ -167,7 +170,7 @@ This version does not read or migrate older PostgreSQL jobs. Existing databases,
 roles, volumes, and uploaded files are not dropped or removed by the installer.
 Old database/path/thread environment settings are ignored; defaults now live
 in code. The optional ignored `.env.example` may still contain legacy settings;
-use the two settings above rather than copying the old template.
+use the settings above rather than copying the old template.
 
 ## Run
 

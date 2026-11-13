@@ -61,18 +61,18 @@ def test_installer_preserves_data_and_checks_cpu_installation() -> None:
     assert "psql" not in script and "postgresql" not in script
 
 
-def test_container_resource_and_privilege_contracts() -> None:
-    compose = (ROOT / "docker-compose.yml").read_text()
-    dockerfile = (ROOT / "Dockerfile").read_text()
-    assert "mem_limit: 6g" in compose and "memory: 6G" in compose
-    assert "memswap_limit: 6g" in compose and "oom_score_adj: 500" in compose
-    assert "./models:/app/models:ro" in compose and "./storage:/app/storage" in compose
-    assert "postgres" not in compose and "redis:7-alpine" in compose
-    assert "DATABASE_URL" not in compose and "POSTGRES_PASSWORD" not in compose
-    assert "127.0.0.1:8000:8000" in compose
-    assert "USER 10001:10001" in dockerfile
-    assert "python:3.11-slim-bookworm AS builder" in dockerfile
-    assert "torch.version.cuda is None" in dockerfile
+def test_native_services_use_the_project_virtual_environment() -> None:
+    script = (ROOT / "deploy/install_ubuntu.sh").read_text()
+    assert 'APP_DIR=/opt/drum-transcription' in script
+    assert '"${PYTHON_BIN}" -m venv "${APP_DIR}/.venv"' in script
+    assert '--system-site-packages' not in script
+    assert '"${APP_DIR}/.venv/bin/python" -m pip install' in script
+    assert unit("drum-api.service")["Service"]["ExecStart"].startswith(
+        "/opt/drum-transcription/.venv/bin/uvicorn "
+    )
+    assert unit("drum-worker.service")["Service"]["ExecStart"].startswith(
+        "/opt/drum-transcription/.venv/bin/celery "
+    )
 
 
 def test_synthesized_loop_is_deterministic_unclipped_and_four_bars() -> None:

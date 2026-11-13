@@ -1,4 +1,4 @@
-"""Conservative single-host defaults; only queue location and browser origins vary."""
+"""Conservative single-host defaults with optional managed deployment paths."""
 
 import os
 from functools import lru_cache
@@ -12,21 +12,32 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Two optional environment settings; no .env file is required."""
+    """Optional environment settings; no .env file is required."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     REDIS_URL: RedisDsn = RedisDsn("redis://localhost:6379/0")
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    APP_STORAGE_DIR: Path = Path("storage")
+    APP_MODELS_DIR: Path = Path("models")
 
-    BASE_STORAGE_DIR: ClassVar[Path] = Path("storage")
-    ADTOF_WEIGHTS_PATH: ClassVar[Path] = Path("models/adtof")
-    OAF_ONNX_PATH: ClassVar[Path] = Path("models/oaf/model.onnx")
     MAX_UPLOAD_SIZE_MB: ClassVar[int] = 100
     ALLOWED_AUDIO_EXTENSIONS: ClassVar[tuple[str, ...]] = (".wav", ".mp3", ".flac", ".aiff")
     OMP_NUM_THREADS: ClassVar[str] = "2"
     MKL_NUM_THREADS: ClassVar[str] = "2"
     OPENBLAS_NUM_THREADS: ClassVar[str] = "2"
     TORCH_NUM_THREADS: ClassVar[int] = 2
+
+    @property
+    def BASE_STORAGE_DIR(self) -> Path:
+        return self.APP_STORAGE_DIR
+
+    @property
+    def ADTOF_WEIGHTS_PATH(self) -> Path:
+        return self.APP_MODELS_DIR / "adtof"
+
+    @property
+    def OAF_ONNX_PATH(self) -> Path:
+        return self.APP_MODELS_DIR / "oaf/model.onnx"
 
     @property
     def UPLOAD_DIR(self) -> Path:

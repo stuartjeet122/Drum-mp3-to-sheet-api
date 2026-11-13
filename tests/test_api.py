@@ -18,6 +18,27 @@ from backend.app.services import storage_service as storage
 from backend.app.workers import tasks
 
 
+def test_managed_paths_use_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("APP_STORAGE_DIR", str(tmp_path / "shared"))
+    monkeypatch.setenv("APP_MODELS_DIR", str(tmp_path / "checkpoints"))
+    settings = Settings(_env_file=None)
+    assert settings.BASE_STORAGE_DIR == tmp_path / "shared"
+    assert settings.UPLOAD_DIR == tmp_path / "shared/uploads"
+    assert settings.PROCESSED_DIR == tmp_path / "shared/processed"
+    assert settings.EXPORTS_DIR == tmp_path / "shared/exports"
+    assert settings.ADTOF_WEIGHTS_PATH == tmp_path / "checkpoints/adtof"
+    assert settings.OAF_ONNX_PATH == tmp_path / "checkpoints/oaf/model.onnx"
+
+
+def test_native_paths_remain_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_STORAGE_DIR", raising=False)
+    monkeypatch.delenv("APP_MODELS_DIR", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.BASE_STORAGE_DIR == Path("storage")
+    assert settings.ADTOF_WEIGHTS_PATH == Path("models/adtof")
+    assert settings.OAF_ONNX_PATH == Path("models/oaf/model.onnx")
+
+
 @pytest.fixture
 def api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, JobStore]]:
     monkeypatch.setattr(Settings, "BASE_STORAGE_DIR", tmp_path)
@@ -154,7 +175,7 @@ def test_manifest_failure_cleans_upload(api, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_request_validation_and_small_configuration() -> None:
-    assert set(Settings.model_fields) == {"REDIS_URL", "CORS_ORIGINS"}
+    assert set(Settings.model_fields) == {"REDIS_URL", "CORS_ORIGINS", "APP_STORAGE_DIR", "APP_MODELS_DIR"}
     assert Settings().MAX_UPLOAD_SIZE_MB == 100 and Settings().TORCH_NUM_THREADS == 2
     with pytest.raises(ValidationError):
         EventCreateItem(time_sec=0, instrument="unknown", velocity=90)
