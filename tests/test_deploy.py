@@ -11,9 +11,128 @@ import soundfile as sf
 import yaml
 
 from scripts import smoke_test as smoke
+from scripts import update_portainer as updater
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_portainer_update_preserves_deployed_configuration() -> None:
+    configuration = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    configuration["services"]["api"]["command"][-1] = "/drum-sheet-api"
+    configuration["services"]["api"]["ports"] = ["127.0.0.1:8100:8000"]
+    original = yaml.safe_dump(configuration)
+    result = yaml.safe_load(updater.updated_stack(original, "drum-transcription:new"))
+    for service in ("api", "worker"):
+        expected = yaml.safe_load(original)["services"][service]
+        expected.pop("build", None)
+        expected.update(image="drum-transcription:new", pull_policy="never")
+        assert result["services"][service] == expected
+    assert result["services"]["redis"] == configuration["services"]["redis"]
+    assert result["volumes"] == configuration["volumes"]
+    environment = [{"name": "API_PORT", "value": "8100"}]
+    payload = updater.update_payload("content", environment)
+    assert payload["Env"] == environment
+    assert payload["Prune"] is payload["PullImage"] is payload["RepullImageAndRedeploy"] is False
+
+
+def test_portainer_update_rejects_unexpected_services() -> None:
+    with pytest.raises(ValueError, match="exactly api, worker and redis"):
+        updater.updated_stack("services: {other: {image: other}}", "drum-transcription:new")
+
+
+def test_portainer_update_refuses_concurrent_changes() -> None:
+    from unittest.mock import Mock
+
+    client = Mock()
+    stack = {"Id": 1, "EndpointId": 2, "Env": []}
+    client.request.side_effect = [stack, {"StackFileContent": "changed"}]
+    with pytest.raises(RuntimeError, match="Stack changed"):
+        updater.stack_unchanged(client, stack, "original")
+    assert all(call.args[0] == "GET" for call in client.request.call_args_list)
+
+
+def test_portainer_api_rejects_insecure_remote_access() -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        updater.Portainer("http://example.com:9000", "test-token")
+
+
+def test_portainer_build_failure_does_not_redeploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+    from unittest.mock import Mock
+
+    configuration = (ROOT / "docker-compose.yml").read_text()
+    stack = {"Id": 1, "Name": "drum-transcription", "EndpointId": 2, "Type": 2}
+    client = Mock()
+    client.request.side_effect = [[stack], stack, {"ID": "daemon"}, {"StackFileContent": configuration}]
+    monkeypatch.setattr(updater, "Portainer", Mock(return_value=client))
+    monkeypatch.setattr(updater.getpass, "getpass", lambda _: "private-test-token")
+    monkeypatch.setattr(updater.sys, "argv", ["update_portainer.py", "--repository", "https://example.com/app.git"])
+
+    def run(arguments: list[str], **kwargs) -> str:
+        if arguments[:2] == ["docker", "info"]:
+            return "daemon"
+        if arguments[0] == "git":
+            return "a" * 40 + "\trefs/heads/main"
+        assert arguments[:2] == ["docker", "build"]
+        raise subprocess.CalledProcessError(1, arguments)
+
+    monkeypatch.setattr(updater, "command", run)
+    assert updater.main() == 1
+    assert all(call.args[0] == "GET" for call in client.request.call_args_list)
+
+
+def test_portainer_updater_rejects_other_docker_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    stack = {"Id": 1, "Name": "drum-transcription", "EndpointId": 2, "Type": 2}
+    client = Mock()
+    client.request.side_effect = [[stack], stack, {"ID": "other-daemon"}]
+    monkeypatch.setattr(updater, "Portainer", Mock(return_value=client))
+    monkeypatch.setattr(updater.getpass, "getpass", lambda _: "private-test-token")
+    monkeypatch.setattr(updater.sys, "argv", ["update_portainer.py", "--repository", "https://example.com/app.git"])
+    commands = Mock(return_value="local-daemon")
+    monkeypatch.setattr(updater, "command", commands)
+    assert updater.main() == 1
+    commands.assert_called_once_with(["docker", "info", "--format", "{{.ID}}"])
+    assert all(call.args[0] == "GET" for call in client.request.call_args_list)
+
+
+def test_portainer_wait_checks_image_ids_and_installed_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    verified = []
+
+    def run(arguments: list[str], **kwargs) -> str:
+        if arguments[:2] == ["docker", "ps"]:
+            return "api-id" if "label=com.docker.compose.service=api" in arguments else "worker-id"
+        if arguments[:2] == ["docker", "inspect"]:
+            return json.dumps([{"Image": "new-image", "State": {"Running": True, "Health": {"Status": "healthy"}}}])
+        assert arguments == ["docker", "exec", "worker-id", "python", "-c", updater.VERIFY_FIX]
+        verified.append(True)
+        return "Velocity fix verified"
+
+    monkeypatch.setattr(updater, "command", run)
+    assert updater.wait_for_containers("new-image", 10) == {"api": "api-id", "worker": "worker-id"}
+    assert verified == [True]
+
+
+def test_portainer_wait_does_not_accept_old_running_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    ticks = iter([0, 0, 2])
+    monkeypatch.setattr(updater.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(updater.time, "sleep", lambda _: None)
+
+    def run(arguments: list[str], **kwargs) -> str:
+        if arguments[:2] == ["docker", "ps"]:
+            return "old-container"
+        assert arguments == ["docker", "inspect", "old-container"]
+        return json.dumps([{"Image": "old-image", "State": {"Running": True, "Health": {"Status": "healthy"}}}])
+
+    monkeypatch.setattr(updater, "command", run)
+    with pytest.raises(RuntimeError, match="Timed out"):
+        updater.wait_for_containers("new-image", 1)
 
 
 def unit(name: str) -> ConfigParser:

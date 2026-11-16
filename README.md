@@ -33,6 +33,10 @@ Uploads/jobs/exports and Redis data use persistent named volumes. Do not run
 See [Docker deployment](deploy/README.md#docker-compose) for model permissions,
 real inference validation, backups, upgrades and exporting a portable image.
 
+For an existing Portainer stack, use the
+[Portainer update script](deploy/README.md#portainer-managed-updates) to rebuild
+and redeploy while preserving its ports, URL prefix and persistent data.
+
 ## Exact Source Tree
 
 Generated environments, caches, and installed package metadata are excluded.
@@ -54,7 +58,8 @@ Generated environments, caches, and installed package metadata are excluded.
 |       |-- drum-api.service
 |       `-- drum-worker.service
 |-- scripts/
-|   `-- smoke_test.py
+|   |-- smoke_test.py
+|   `-- update_portainer.py
 |-- backend/
 |   |-- __init__.py
 |   `-- app/

@@ -104,6 +104,72 @@ Verify actual limits with Docker inspect and use a host with enforced cgroups.
 Do not treat health checks as automatic restarts or OOM recovery: monitor logs
 and quarantine repeatedly failing tasks rather than repeatedly purging queues.
 
+### Portainer-Managed Updates
+
+For the existing `drum-transcription` web-editor stack on Docker Standalone,
+`scripts/update_portainer.py` rebuilds from an exact remote Git revision and
+redeploys through Portainer's API. It does not create a competing Compose
+deployment, change Nginx, remove containers manually, delete images/volumes,
+change model permissions, or modify the root-owned local Git checkout.
+
+Prerequisites: the existing stack and its containers must still exist, the Git
+repository must be trusted and publicly readable over HTTPS, and the script
+must run on the Docker host/context managed by that stack's Portainer endpoint.
+It refuses Git-managed stacks, auto-updating stacks, duplicate stack names and
+stacks with services other than `api`, `worker` and `redis`. The API must have a
+health check. Stack ports, prefix, environment, mounts, resource limits and Redis
+configuration are preserved, not replaced with the repository's defaults.
+
+1. Commit and push the source changes first. Back up application data, pause
+	external deployment automation, and choose a maintenance window with no
+	active jobs or new submissions. Updating is not zero-downtime; the existing
+	worker's graceful stop timeout is retained.
+2. Transfer the updater from this Windows checkout to Ubuntu:
+
+	```powershell
+	scp .\scripts\update_portainer.py sjeetoo@stuserver:~/update_portainer.py
+	```
+
+3. In Portainer, open your user account's **My account / Access tokens** area
+	and generate an API access token with permission to read and update this
+	stack. Do not put the token into chat, Git, a command argument or shell history.
+4. On Ubuntu, install the small host-side requirements and run the updater,
+	replacing the repository URL:
+
+	```sh
+	sudo apt-get update
+	sudo apt-get install -y python3-yaml git
+	sudo python3 ~/update_portainer.py --repository https://github.com/YOUR-ORG/YOUR-REPO.git
+	```
+
+	Paste the token only into its hidden terminal prompt. Default Portainer access
+	is `http://127.0.0.1:9000`, matching this server's loopback management port.
+	For HTTPS use `--portainer-url https://HOST:9443` and, if necessary,
+	`--ca-file /path/to/trusted-ca.pem`. TLS verification is never disabled;
+	remote plain HTTP and redirects are refused. Root/Docker access is privileged:
+	review the updater, repository and Dockerfile before running them.
+
+The script resolves `main` (override with `--branch`), builds a uniquely tagged
+image, verifies the installed OaF clipping fix in a disposable container, then
+rechecks that the Portainer configuration has not changed during the build.
+Only then does it request redeployment, with image pulling and service pruning
+disabled. It waits for the new image IDs in API and worker, healthy API state,
+and the fixed code in the running worker. Use `--timeout 1800` if startup needs
+more than the default 900 seconds. It does not claim that worker readiness or
+real inference has passed merely because the container is running.
+
+Before redeployment, the old stack configuration and environment are backed up
+under the printed `/var/tmp/drum-portainer-*/stack.json` path in a private
+directory (0700) and file (0600). That file can contain secrets: keep it private.
+Old images and volumes are retained; this is a configuration backup, not a data
+backup or automatic rollback. On failure inspect Portainer's deployment logs;
+restore the prior image settings/configuration through Portainer if necessary.
+Do not delete volumes or rerun blindly while a deployment is still active.
+
+After success, retry the failed job or run the smoke test in the API container.
+The updater deliberately does not submit audio jobs or delete old images.
+Its Portainer API and Docker behavior still requires live-host verification.
+
 ## Native Ubuntu
 
 Run from the checked-out project on the server:
