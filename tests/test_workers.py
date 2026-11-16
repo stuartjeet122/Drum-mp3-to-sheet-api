@@ -54,6 +54,7 @@ def test_process_progress_custom_output_and_duplicate_delivery(prepared, monkeyp
 
     def full(*args, **kwargs):
         assert args[3] == Settings.BASE_STORAGE_DIR / "takes/notation" / str(job.id)
+        assert kwargs["notation_options"] == job.notation_options
         kwargs["on_progress"]("ADTOF_TRANSCRIPTION", 45)
         assert store.read(job.id).status == JobStatus.ADTOF_TRANSCRIPTION
         kwargs["on_progress"]("COMPLETED", 100)
@@ -74,11 +75,17 @@ def test_process_progress_custom_output_and_duplicate_delivery(prepared, monkeyp
 def test_process_failure_records_clean_error(prepared, monkeypatch: pytest.MonkeyPatch) -> None:
     store, job, _ = prepared
     pipeline = Mock()
-    pipeline.run_full_pipeline.side_effect = RuntimeError("private model path")
+
+    def fail(*args, **kwargs):
+        kwargs["on_progress"]("ADTOF_TRANSCRIPTION", 45)
+        raise RuntimeError("private model path")
+
+    pipeline.run_full_pipeline.side_effect = fail
     monkeypatch.setattr(tasks, "_pipeline", lambda: pipeline)
     with pytest.raises(RuntimeError):
         tasks.process_transcription_task.run(str(job.id))
     assert store.read(job.id).status == JobStatus.FAILED
+    assert store.read(job.id).failed_stage == "ADTOF_TRANSCRIPTION"
     assert "private" not in store.read(job.id).error_message
 
 

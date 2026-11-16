@@ -15,7 +15,7 @@ from backend.app.core.config import get_settings
 from backend.app.services.job_store import get_job_store
 from backend.app.schemas.transcription import (
     BulkEventPatchRequest, ErrorResponse, EventsListResponse, HealthCheckResponse,
-    JobStatusResponse, JobUploadResponse, VoiceStemUploadResponse,
+    JobStatusResponse, JobUploadResponse, NotationOptions, VoiceStemUploadResponse,
 )
 from backend.app.services import storage_service as storage
 from backend.app.services import transcription_service as service
@@ -173,6 +173,14 @@ def patch_events(job_id: JobID, patch: BulkEventPatchRequest) -> EventsListRespo
     retry with an empty patch, not the original additions.
     """
     return service.patch_events(job_id, patch)
+
+
+@router.patch("/transcriptions/{job_id}/notation", tags=["Events & Editing"],
+              response_model=JobStatusResponse,
+              summary="Set notation and drum-layout options, then rebuild the score")
+def patch_notation(job_id: JobID, options: NotationOptions) -> JobStatusResponse:
+    """Regenerate only cached notation; detected and edited hits remain unchanged."""
+    return service.update_notation(job_id, options)
 
 
 @router.get("/transcriptions/{job_id}/export/{format}", tags=["Exports"], response_class=FileResponse,

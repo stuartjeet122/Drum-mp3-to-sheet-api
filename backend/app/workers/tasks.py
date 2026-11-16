@@ -54,6 +54,7 @@ def _progress(job_id: UUID, stage: str, percent: int) -> None:
         job.status = status
         job.progress_percent = percent
         job.error_message = None
+        job.failed_stage = None
 
 
 def _fail(job_id: UUID, exc: Exception) -> None:
@@ -66,6 +67,8 @@ def _fail(job_id: UUID, exc: Exception) -> None:
         message = "Transcription processing failed. Please retry or contact the administrator."
     try:
         with get_job_store().edit(job_id) as job:
+            if job.status != JobStatus.FAILED:
+                job.failed_stage = job.status.value
             job.status = JobStatus.FAILED
             job.error_message = message
     except Exception:
@@ -99,6 +102,7 @@ def _store_score(job: TranscriptionJob, score: MusicalTranscription,
     job.total_measures = score.total_measures
     job.midi_path, job.musicxml_path, job.pdf_path = midi, xml, pdf
     job.error_message = None
+    job.failed_stage = None
     job.status, job.progress_percent = JobStatus.COMPLETED, 100
 
 
@@ -120,6 +124,7 @@ def process_transcription_task(self: Task, job_id: str) -> dict[str, Any]:
         artifacts = _pipeline().run_full_pipeline(
             job_id, input_path, settings.PROCESSED_DIR / str(identifier),
             export_dir, on_progress=on_progress,
+            notation_options=job.notation_options,
         )
         with get_job_store().edit(identifier) as job:
             records: list[DrumEventRecord] = []
@@ -198,6 +203,7 @@ def regenerate_exports_task(self: Task, job_id: str) -> dict[str, Any]:
         with TemporaryDirectory(prefix="rebuild-", dir=export_dir) as directory:
             score, midi, xml, pdf = _pipeline().regenerate_exports_from_events(
                 job_id, events, original, Path(directory), title=title, bpm_override=override,
+                notation_options=job.notation_options,
             )
             with get_job_store().edit(identifier) as job:
                 rows = _editable_rows(job)

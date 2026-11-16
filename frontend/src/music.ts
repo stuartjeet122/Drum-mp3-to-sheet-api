@@ -1,6 +1,35 @@
 export type Drum = 'kick' | 'snare' | 'hihat' | 'tom1' | 'tom2' | 'floor' | 'crash' | 'ride';
 export interface Hit { time: number; duration: number; midi: number; velocity: number }
 export interface Sequence { hits: Hit[]; duration: number; bpm: number }
+export interface HumanizeSettings {
+  swing: number;
+  timingMs: number;
+  velocityPercent: number;
+  quantizePercent: number;
+}
+
+function variation(index: number, salt: number): number {
+  const value = Math.sin((index + 1) * 127.1 + salt * 311.7) * 43758.5453;
+  return (value - Math.floor(value)) * 2 - 1;
+}
+
+export function humanizeHits(hits: Hit[], bpm: number, duration: number, settings: HumanizeSettings): Hit[] {
+  const quarter = 60 / bpm;
+  const sixteenth = quarter / 4;
+  return hits.map((hit, index) => {
+    const snapped = Math.round(hit.time / sixteenth) * sixteenth;
+    const quantized = hit.time + (snapped - hit.time) * settings.quantizePercent / 100;
+    const eighthIndex = Math.round(quantized / (quarter / 2));
+    const swingOffset = eighthIndex % 2 === 1 ? quarter / 6 * settings.swing / 100 : 0;
+    const timingOffset = variation(index, 1) * settings.timingMs / 1000;
+    const velocityScale = 1 + variation(index, 2) * settings.velocityPercent / 100;
+    return {
+      ...hit,
+      time: Math.max(0, Math.min(duration, quantized + swingOffset + timingOffset)),
+      velocity: Math.max(0.05, Math.min(1, hit.velocity * velocityScale)),
+    };
+  }).sort((left, right) => left.time - right.time);
+}
 
 export const drums: { id: Drum; name: string; color: string; note: number }[] = [
   { id: 'kick', name: 'Kick', color: '#74d7ff', note: 36 },

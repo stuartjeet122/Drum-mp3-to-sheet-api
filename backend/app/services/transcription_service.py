@@ -4,6 +4,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 import logging
 from pathlib import Path
+from statistics import median
+from threading import Lock
+from time import monotonic
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile
@@ -11,6 +14,7 @@ from fastapi import HTTPException, UploadFile
 from backend.app.models import DrumEventRecord, EventSource, JobStatus, TranscriptionJob
 from backend.app.schemas.transcription import (
     BulkEventPatchRequest, DrumEventOut, EventsListResponse, JobStatusResponse, JobUploadResponse,
+    NotationOptions,
     VoiceStemUploadResponse,
 )
 from backend.app.services import storage_service as storage
@@ -21,6 +25,11 @@ from engine.notation.drum_mapping import get_drum_spec
 logger = logging.getLogger(__name__)
 RUNNING_STATUSES = set(JobStatus) - {JobStatus.UPLOADED, JobStatus.COMPLETED, JobStatus.FAILED}
 EDITABLE_SOURCES = (EventSource.FUSED, EventSource.MANUAL)
+_ETA_SNAPSHOT_TTL = 15.0
+_eta_snapshot_lock = Lock()
+_eta_snapshot_at = 0.0
+_eta_snapshot: list[TranscriptionJob] = []
+_eta_snapshot_directory: Path | None = None
 
 
 def require_job(job_id: UUID) -> TranscriptionJob:
@@ -46,7 +55,47 @@ def _not_running(job: TranscriptionJob) -> None:
         raise HTTPException(409, "This job is queued or running. Wait for it to finish.")
 
 
-def status_response(job: TranscriptionJob) -> JobStatusResponse:
+def _can_retry_notation(job: TranscriptionJob) -> bool:
+    return bool(job.original_wav_path and job.original_wav_path.is_file()
+                and (job.original_wav_path.parent / "rhythm.json").is_file())
+
+
+def _estimated_wait(job: TranscriptionJob, recent: list[TranscriptionJob]) -> int | None:
+    if job.status not in RUNNING_STATUSES:
+        return None
+    durations = [
+        (candidate.updated_at - candidate.created_at).total_seconds()
+        for candidate in recent
+        if candidate.status == JobStatus.COMPLETED
+        and candidate.updated_at > candidate.created_at
+    ]
+    if not durations:
+        return None
+    average = median(durations)
+    ahead = sum(
+        candidate.id != job.id and candidate.status in RUNNING_STATUSES
+        and candidate.created_at < job.created_at
+        for candidate in recent
+    )
+    remaining = average * max(0, 100 - job.progress_percent) / 100
+    return max(0, round(average * ahead + remaining))
+
+
+def _recent_for_eta() -> list[TranscriptionJob]:
+    global _eta_snapshot, _eta_snapshot_at, _eta_snapshot_directory
+    with _eta_snapshot_lock:
+        now = monotonic()
+        store = get_job_store()
+        if _eta_snapshot_directory != store.directory or now - _eta_snapshot_at >= _ETA_SNAPSHOT_TTL:
+            _eta_snapshot = store.list_recent(100, 0)
+            _eta_snapshot_at = now
+            _eta_snapshot_directory = store.directory
+        return _eta_snapshot
+
+
+def status_response(
+    job: TranscriptionJob, recent: list[TranscriptionJob] | None = None,
+) -> JobStatusResponse:
     """Advertise only committed current artifacts that also exist on disk."""
     available: dict[str, bool] = {}
     for kind in storage.EXPORT_FILES:
@@ -66,11 +115,22 @@ def status_response(job: TranscriptionJob) -> JobStatusResponse:
         except HTTPException as exc:
             if exc.status_code != 404:
                 raise
+    recent = recent if recent is not None else _recent_for_eta()
+    retry_stage = None
+    if job.status == JobStatus.FAILED:
+        if _can_retry_notation(job):
+            retry_stage = JobStatus.NOTATION_GENERATION.value
+        elif job.stored_audio_path.is_file():
+            retry_stage = "FULL_TRANSCRIPTION"
     return JobStatusResponse(
         job_id=job.id, status=job.status, progress_percent=job.progress_percent,
         original_filename=job.original_filename, voice_filename=voice_filename,
         bpm=job.bpm, time_signature=job.time_signature,
-        duration_sec=job.duration_sec, quality_metrics=job.quality_metrics,
+        duration_sec=job.duration_sec, total_measures=job.total_measures,
+        quality_metrics=job.quality_metrics,
+        notation_options=NotationOptions.model_validate(job.notation_options),
+        failed_stage=job.failed_stage, retry_stage=retry_stage,
+        estimated_wait_seconds=_estimated_wait(job, recent),
         error_message=job.error_message, available_exports=available, updated_at=job.updated_at,
         upload_directory=job.upload_directory, output_directory=job.output_directory,
     )
@@ -162,6 +222,7 @@ def _dispatch(job_id: UUID, *, regenerate: bool) -> None:
         try:
             with edit_job(job_id) as job:
                 if job.status in RUNNING_STATUSES and job.progress_percent in {0, 95}:
+                    job.failed_stage = job.status.value
                     job.status = JobStatus.FAILED
                     job.error_message = "Changes were saved, but background processing could not be queued. Retry the request."
         except Exception:
@@ -173,18 +234,42 @@ def start_job(job_id: UUID) -> JobStatusResponse:
     """Reserve before enqueue so duplicate starts cannot replace edited completed jobs."""
     with edit_job(job_id) as job:
         _not_running(job)
-        if job.original_wav_path is not None or job.status == JobStatus.COMPLETED:
+        if job.status == JobStatus.COMPLETED:
             raise HTTPException(409, "This job has a score already. Edit/regenerate it or upload a new recording.")
         if not job.stored_audio_path.is_file():
             raise HTTPException(409, "The uploaded audio is no longer available.")
-        job.status, job.progress_percent, job.error_message = JobStatus.PREPROCESSING, 0, None
-    _dispatch(job_id, regenerate=False)
+        regenerate = job.status == JobStatus.FAILED and job.failed_stage == JobStatus.NOTATION_GENERATION.value and _can_retry_notation(job)
+        if job.original_wav_path is not None and job.status != JobStatus.FAILED:
+            raise HTTPException(409, "This job has a score already. Edit/regenerate it or upload a new recording.")
+        job.status = JobStatus.NOTATION_GENERATION if regenerate else JobStatus.PREPROCESSING
+        job.progress_percent = 95 if regenerate else 0
+        job.error_message = None
+        job.failed_stage = None
+    _dispatch(job_id, regenerate=regenerate)
     return status_response(job)
 
 
 def list_jobs(limit: int, offset: int) -> list[JobStatusResponse]:
     """Return a bounded, deterministic newest-first page."""
-    return [status_response(job) for job in get_job_store().list_recent(limit, offset)]
+    store = get_job_store()
+    recent = _recent_for_eta()
+    page = store.list_recent(limit, offset)
+    return [status_response(job, recent) for job in page]
+
+
+def update_notation(job_id: UUID, options: NotationOptions) -> JobStatusResponse:
+    """Persist validated engraving choices and queue the cached score rebuild."""
+    with edit_job(job_id) as job:
+        _not_running(job)
+        if job.status != JobStatus.COMPLETED or not _can_retry_notation(job):
+            raise HTTPException(409, "A completed score with its prepared audio and rhythm cache is required.")
+        if any(section.end_measure > (job.total_measures or 0) for section in options.sections):
+            raise HTTPException(422, "Notation section measures must fit within the current score.")
+        job.notation_options = options.model_dump(mode="json")
+        job.status, job.progress_percent, job.error_message = JobStatus.NOTATION_GENERATION, 95, None
+        job.failed_stage = None
+    _dispatch(job_id, regenerate=True)
+    return status_response(require_job(job_id))
 
 
 def events_response(job: TranscriptionJob, include_raw: bool = False) -> EventsListResponse:

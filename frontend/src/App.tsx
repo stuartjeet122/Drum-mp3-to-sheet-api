@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, ArrowUpRight, AudioLines, Check, CheckCheck, ChevronRight, CircleAlert, Clock3, Drum, FileAudio, FileMusic, FileText, Headphones, LoaderCircle, Music2, Play, Plus, Radio, RefreshCw, ShieldCheck, Upload, X } from 'lucide-react';
 import Player from './Player';
+import JobDiagnostics from './JobDiagnostics';
+import NotationControls from './NotationControls';
 import { exportUrl, formatTime, isActive, request, stages, uploadAudio, validateAudio, type Job } from './api';
 import { readMidi, type Sequence } from './music';
 
@@ -35,6 +37,7 @@ export default function App() {
   const [reloadMidi, setReloadMidi] = useState(0);
   const [opening, setOpening] = useState<string | null>(null);
   const [connectionCheck, setConnectionCheck] = useState(0);
+  const [page, setPage] = useState<'upload' | 'play'>(() => new URLSearchParams(location.search).get('page') === 'play' ? 'play' : 'upload');
   const input = useRef<HTMLInputElement>(null);
   const uploadController = useRef<AbortController | null>(null);
   const selectionController = useRef<AbortController | null>(null);
@@ -43,7 +46,11 @@ export default function App() {
   const complete = job?.status === 'COMPLETED';
   const failed = job?.status === 'FAILED';
   const stageIndex = Math.max(0, stages.findIndex(stage => stage.codes.includes(job?.status || '')));
-  const page = new URLSearchParams(location.search).get('page') === 'play' ? 'play' : 'upload';
+  useEffect(() => {
+    const updatePage = () => setPage(new URLSearchParams(location.search).get('page') === 'play' ? 'play' : 'upload');
+    window.addEventListener('popstate', updatePage);
+    return () => window.removeEventListener('popstate', updatePage);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -146,6 +153,8 @@ export default function App() {
     try {
       const next = await request<Job>(`/transcriptions/${id}/status`, { signal: controller.signal });
       setJob(next); setOnline(true); setFile(null);
+      history.pushState(null, '', `${location.pathname}?page=play#job=${next.job_id}`);
+      setPage('play');
     } catch (error) { if (error instanceof Error && error.name !== 'AbortError') setError(error.message); }
     finally { if (!controller.signal.aborted) setOpening(null); }
   }
@@ -172,7 +181,7 @@ export default function App() {
             {error && <div className="error-banner" role="alert"><CircleAlert size={17} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div>}
           </section>
 
-          {job && !file && <section className={`job-progress ${failed ? 'job-failed' : ''}`} aria-label="Transcription progress" aria-live="polite"><div className="progress-top"><span className={`status-mark ${complete ? 'done' : ''}`}>{complete ? <CheckCheck size={18} /> : failed ? <CircleAlert size={18} /> : job.status === 'UPLOADED' ? <FileAudio size={18} /> : <AudioLines size={18} className="soft-pulse" />}</span><div><h3>{complete ? 'Your groove, on paper.' : failed ? 'This take needs another try.' : job.status === 'UPLOADED' ? 'Recording uploaded.' : stages[stageIndex].title}</h3><p title={job.original_filename}>{job.original_filename}</p></div><strong>{job.progress_percent}<small>%</small></strong></div><div className="progress-track" role="progressbar" aria-label="Transcription completion" aria-valuenow={job.progress_percent} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${job.progress_percent}%` }} /></div>{!complete && !failed && job.status !== 'UPLOADED' && <ol className="stage-list">{stages.map((stage, index) => <li key={stage.title} className={index < stageIndex ? 'stage-complete' : index === stageIndex ? 'stage-current' : ''}><span>{index < stageIndex ? <Check size={10} /> : index + 1}</span>{stage.title}</li>)}</ol>}{complete && <><div className="result-metadata"><span>{job.bpm?.toFixed(1)} <small>BPM</small></span><i /><span>{job.time_signature} <small>TIME</small></span><i /><span>{formatTime(job.duration_sec || 0)} <small>LENGTH</small></span></div><a className="primary-button open-score-button" href={playUrl}><Play size={16} fill="currentColor" />Play & view score<ArrowRight size={16} /></a></>}{failed && <p className="failure-message">{job.error_message || 'The server could not finish this recording.'}</p>}{(failed || job.status === 'UPLOADED') && <button className="secondary-button retry-button" onClick={retry} disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{job.status === 'UPLOADED' ? 'Start transcription' : 'Retry transcription'}</button>}{pollError && <p className="connection-warning"><Radio size={13} />Connection interrupted. Reconnecting automatically.</p>}</section>}
+          {job && !file && <section className={`job-progress ${failed ? 'job-failed' : ''}`} aria-label="Transcription progress" aria-live="polite"><div className="progress-top"><span className={`status-mark ${complete ? 'done' : ''}`}>{complete ? <CheckCheck size={18} /> : failed ? <CircleAlert size={18} /> : job.status === 'UPLOADED' ? <FileAudio size={18} /> : <AudioLines size={18} className="soft-pulse" />}</span><div><h3>{complete ? 'Your groove, on paper.' : failed ? 'This take needs another try.' : job.status === 'UPLOADED' ? 'Recording uploaded.' : stages[stageIndex].title}</h3><p title={job.original_filename}>{job.original_filename}</p></div><strong>{job.progress_percent}<small>%</small></strong></div><div className="progress-track" role="progressbar" aria-label="Transcription completion" aria-valuenow={job.progress_percent} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${job.progress_percent}%` }} /></div>{!complete && !failed && job.status !== 'UPLOADED' && <ol className="stage-list">{stages.map((stage, index) => <li key={stage.title} className={index < stageIndex ? 'stage-complete' : index === stageIndex ? 'stage-current' : ''}><span>{index < stageIndex ? <Check size={10} /> : index + 1}</span>{stage.title}</li>)}</ol>}{complete && <><div className="result-metadata"><span>{job.bpm?.toFixed(1)} <small>BPM</small></span><i /><span>{job.time_signature} <small>TIME</small></span><i /><span>{formatTime(job.duration_sec || 0)} <small>LENGTH</small></span></div><a className="primary-button open-score-button" href={playUrl}><Play size={16} fill="currentColor" />Play & view score<ArrowRight size={16} /></a></>}{job.status !== 'UPLOADED' && <JobDiagnostics job={job} busy={busy} onRetry={() => void retry()} />}{job.status === 'UPLOADED' && <button className="secondary-button retry-button" onClick={retry} disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}Start transcription</button>}{pollError && <p className="connection-warning"><Radio size={13} />Connection interrupted. Reconnecting automatically.</p>}</section>}
         </div>
 
         <aside className="upload-aside">
@@ -181,9 +190,11 @@ export default function App() {
         </aside>
       </div> : <>
         <div className="play-page-intro"><p>{job?.original_filename ? `Now playing: ${job.original_filename}` : 'Explore the built-in groove or open a completed recording from your library.'}</p><a className="secondary-button" href={uploadUrl}><Upload size={15} />Upload a recording</a></div>
-        <div className="play-page-player"><Player sequence={sequence} title={job?.original_filename || ''} loading={midiLoading} jobId={job?.job_id ?? null} voiceFilename={job?.voice_filename ?? null} onVoiceFilenameChange={filename => { if (job) setJob(previous => previous && previous.job_id === job.job_id ? { ...previous, voice_filename: filename } : previous); }} />{midiError && <div className="error-banner" role="alert"><CircleAlert size={16} /><span>{midiError}</span><button className="icon-button" onClick={() => setReloadMidi(value => value + 1)} aria-label="Retry MIDI loading" title="Retry MIDI loading"><RefreshCw size={15} /></button></div>}</div>
+        {job && <JobDiagnostics job={job} busy={busy} onRetry={() => void retry()} />}
+        <div className="play-page-player"><Player sequence={sequence} title={job?.original_filename || ''} loading={midiLoading} jobId={job?.job_id ?? null} voiceFilename={job?.voice_filename ?? null} timeSignature={job?.time_signature || '4/4'} onVoiceFilenameChange={filename => { if (job) setJob(previous => previous && previous.job_id === job.job_id ? { ...previous, voice_filename: filename } : previous); }} />{midiError && <div className="error-banner" role="alert"><CircleAlert size={16} /><span>{midiError}</span><button className="icon-button" onClick={() => setReloadMidi(value => value + 1)} aria-label="Retry MIDI loading" title="Retry MIDI loading"><RefreshCw size={15} /></button></div>}</div>
         <section className="score-section" aria-labelledby="score-title" id="score"><div className="score-section-heading"><div><div className="eyebrow"><span className="section-number">02</span>THE FINAL TAKE</div><h2 id="score-title">On the record<span>.</span></h2></div><div className="export-actions">{([{ id: 'pdf', label: 'PDF', icon: FileText }, { id: 'midi', label: 'MIDI', icon: FileMusic }, { id: 'musicxml', label: 'MusicXML', icon: Music2 }] as const).map(format => complete && job.available_exports[format.id] ? <a key={format.id} className={`export-button ${format.id === 'pdf' ? 'export-primary' : ''}`} href={exportUrl(job.job_id, format.id)} download><format.icon size={16} />{format.label}<ArrowDownToLine size={14} /></a> : <button key={format.id} className="export-button" disabled title={complete ? `${format.label} is unavailable for this recording` : 'Available when your score is ready'}><format.icon size={16} />{format.label}<ArrowDownToLine size={14} /></button>)}</div></div>
-          {complete && job.available_exports.pdf ? <Suspense fallback={<div className="score-loading"><LoaderCircle className="spin" size={24} /></div>}><PdfScore jobId={job.job_id} /></Suspense> : <div className="score-empty"><div className="empty-score-paper" aria-hidden="true"><div className="paper-title-line" /><div className="paper-subtitle-line" /><div className="empty-staff"><i /><i /><i /><i /><i /></div><div className="empty-staff"><i /><i /><i /><i /><i /></div><Music2 size={29} strokeWidth={1.2} /></div><div className="score-empty-copy"><span className="section-tag">{complete ? 'PDF UNAVAILABLE' : active ? 'IN THE MAKING' : 'THE NEXT CHAPTER'}</span><h3>{complete ? 'The groove is ready.' : active ? 'A score worth waiting for.' : 'Good grooves deserve paper.'}</h3><p>{complete ? 'Your MIDI and MusicXML are ready above.' : active ? stages[stageIndex].title : 'Open a completed recording to view its score.'}</p></div><span className="score-empty-number" aria-hidden="true">02</span></div>}
+          {complete && job && <NotationControls job={job} onJobChange={next => setJob(next)} />}
+          {complete && job?.available_exports.pdf ? <Suspense fallback={<div className="score-loading"><LoaderCircle className="spin" size={24} /></div>}><PdfScore jobId={job.job_id} /></Suspense> : <div className="score-empty"><div className="empty-score-paper" aria-hidden="true"><div className="paper-title-line" /><div className="paper-subtitle-line" /><div className="empty-staff"><i /><i /><i /><i /><i /></div><div className="empty-staff"><i /><i /><i /><i /><i /></div><Music2 size={29} strokeWidth={1.2} /></div><div className="score-empty-copy"><span className="section-tag">{complete ? 'PDF UNAVAILABLE' : active ? 'IN THE MAKING' : 'THE NEXT CHAPTER'}</span><h3>{complete ? 'The groove is ready.' : active ? 'A score worth waiting for.' : 'Good grooves deserve paper.'}</h3><p>{complete ? 'Your MIDI and MusicXML are ready above.' : active ? stages[stageIndex].title : 'Open a completed recording to view its score.'}</p></div><span className="score-empty-number" aria-hidden="true">02</span></div>}
         </section>
       </>}
       <footer className="site-footer"><a href={uploadUrl} className="footer-brand"><Drum size={16} />backbeat.</a><span>MADE FOR THE POCKET.</span><span className="footer-right">KEEP YOUR RHYTHM HUMAN <span className="footer-spark">+</span></span></footer>

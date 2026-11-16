@@ -1,6 +1,7 @@
 """Database-free HTTP workflows with real manifests and temporary audio files."""
 
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID, uuid4
@@ -11,9 +12,10 @@ from pydantic import ValidationError
 
 from backend.app.core.config import Settings
 from backend.app.main import app
-from backend.app.models import DrumEventRecord, EventSource, JobStatus
+from backend.app.models import DrumEventRecord, EventSource, JobStatus, TranscriptionJob
 from backend.app.schemas.transcription import BulkEventPatchRequest, EventCreateItem, EventUpdateItem
 from backend.app.services.job_store import get_job_store, JobStore
+from backend.app.services.transcription_service import _estimated_wait
 from backend.app.services import storage_service as storage
 from backend.app.workers import tasks
 
@@ -60,7 +62,7 @@ def uploaded(client: TestClient, **directories: str) -> UUID:
 
 def complete(store: JobStore, identifier: UUID) -> tuple[UUID, UUID]:
     with store.edit(identifier) as job:
-        job.status, job.progress_percent, job.bpm, job.duration_sec = JobStatus.COMPLETED, 100, 120, 10
+        job.status, job.progress_percent, job.bpm, job.duration_sec, job.total_measures = JobStatus.COMPLETED, 100, 120, 10, 2
         job.original_wav_path = Settings().PROCESSED_DIR / str(identifier) / "original.wav"
         job.original_wav_path.parent.mkdir(parents=True)
         job.original_wav_path.write_bytes(b"prepared")
@@ -178,7 +180,81 @@ def test_editing_preserves_raw_ids_and_invalidates_exports(api) -> None:
     assert store.read(identifier).events[0].velocity == 70
     assert client.get(prefix + "/export/midi").status_code == 404
     assert not any(client.get(prefix + "/status").json()["available_exports"].values())
+
+
+def test_notation_options_queue_cached_regeneration_without_changing_events(api) -> None:
+    client, store = api
+    identifier = uploaded(client)
+    _, event_id = complete(store, identifier)
+    job = store.read(identifier)
+    assert job.original_wav_path is not None
+    (job.original_wav_path.parent / "rhythm.json").write_text("cached", encoding="utf-8")
+    response = client.patch(f"/api/transcriptions/{identifier}/notation", json={
+        "show_dynamics": True, "show_accents": False, "show_sticking": True,
+        "accent_threshold": 110, "measures_per_system": 3,
+        "sections": [{"start_measure": 1, "end_measure": 2, "label": "Intro", "repeat": True}],
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "NOTATION_GENERATION"
+    assert response.json()["notation_options"]["show_accents"] is False
+    assert response.json()["notation_options"]["sections"][0]["label"] == "Intro"
+    assert store.read(identifier).events[1].id == event_id
     tasks.regenerate_exports_task.delay.assert_called_once_with(str(identifier))
+
+
+def test_failed_notation_retries_only_the_cached_score_stage(api) -> None:
+    client, store = api
+    identifier = uploaded(client)
+    complete(store, identifier)
+    with store.edit(identifier) as job:
+        assert job.original_wav_path is not None
+        (job.original_wav_path.parent / "rhythm.json").write_text("cached", encoding="utf-8")
+        job.status = JobStatus.FAILED
+        job.failed_stage = JobStatus.NOTATION_GENERATION.value
+        job.error_message = "Score rendering failed."
+
+    status = client.get(f"/api/transcriptions/{identifier}/status").json()
+    assert status["failed_stage"] == "NOTATION_GENERATION"
+    assert status["retry_stage"] == "NOTATION_GENERATION"
+    response = client.post(f"/api/transcriptions/{identifier}/start")
+    assert response.status_code == 202
+    assert response.json()["status"] == "NOTATION_GENERATION"
+    tasks.regenerate_exports_task.delay.assert_called_once_with(str(identifier))
+    tasks.process_transcription_task.delay.assert_not_called()
+
+
+def test_notation_options_reject_sections_outside_current_score(api) -> None:
+    client, store = api
+    identifier = uploaded(client)
+    complete(store, identifier)
+    job = store.read(identifier)
+    assert job.original_wav_path is not None
+    (job.original_wav_path.parent / "rhythm.json").write_text("cached", encoding="utf-8")
+    response = client.patch(f"/api/transcriptions/{identifier}/notation", json={
+        "sections": [{"start_measure": 1, "end_measure": 3, "label": "Too long"}],
+    })
+    assert response.status_code == 422
+    assert store.read(identifier).status == JobStatus.COMPLETED
+
+
+def test_wait_estimate_uses_recent_completed_durations_and_queue_position() -> None:
+    now = datetime.now(timezone.utc)
+    completed = [
+        TranscriptionJob(original_filename="short.wav", stored_audio_path=Path("short.wav"),
+                         status=JobStatus.COMPLETED, created_at=now - timedelta(hours=2),
+                         updated_at=now - timedelta(hours=2) + timedelta(seconds=60)),
+        TranscriptionJob(original_filename="long.wav", stored_audio_path=Path("long.wav"),
+                         status=JobStatus.COMPLETED, created_at=now - timedelta(hours=1),
+                         updated_at=now - timedelta(hours=1) + timedelta(seconds=120)),
+    ]
+    active = TranscriptionJob(original_filename="active.wav", stored_audio_path=Path("active.wav"),
+                              status=JobStatus.ADTOF_TRANSCRIPTION, progress_percent=50,
+                              created_at=now - timedelta(seconds=30), updated_at=now)
+    queued = TranscriptionJob(original_filename="queued.wav", stored_audio_path=Path("queued.wav"),
+                              status=JobStatus.PREPROCESSING, created_at=now, updated_at=now)
+    recent = [*completed, active, queued]
+    assert _estimated_wait(active, recent) == 45
+    assert _estimated_wait(queued, recent) == 180
 
 
 def test_bad_event_ids_roll_back_and_broker_failure_keeps_saved_edits(api) -> None:

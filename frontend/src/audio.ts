@@ -42,17 +42,62 @@ export class DrumAudio {
   private limiter = new Tone.Limiter(-1.5).connect(this.output);
   private drumChannel = new Tone.Volume(0).connect(this.limiter);
   private voiceChannel = new Tone.Volume(-4).connect(this.limiter);
-  private players = new Tone.Players(sampleUrls, { fadeOut: 0.035 }).connect(this.drumChannel);
+  private countInSynth = new Tone.Synth({
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.002, decay: 0.04, sustain: 0, release: 0.02 },
+  }).connect(this.output);
+  private sampleLoadError: Error | null = null;
+  private rejectSampleLoad: ((error: Error) => void) | null = null;
+  private players = new Tone.Players(sampleUrls, {
+    fadeOut: 0.035,
+    onerror: error => {
+      this.sampleLoadError = error;
+      this.rejectSampleLoad?.(error);
+    },
+  }).connect(this.drumChannel);
   private voicePlayer: Tone.Player | null = null;
   private voiceLoadId = 0;
+  private loadPromise: Promise<void> | null = null;
 
   async unlock() {
     await Tone.start();
-    await Tone.loaded();
+    if (this.sampleLoadError) throw this.sampleLoadError;
+    this.loadPromise ||= new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.rejectSampleLoad = null;
+        reject(new Error('Drum samples took too long to load.'));
+      }, 20_000);
+      this.rejectSampleLoad = error => {
+        clearTimeout(timeout);
+        reject(error);
+      };
+      void Tone.loaded().then(() => {
+        clearTimeout(timeout);
+        if (this.sampleLoadError) reject(this.sampleLoadError);
+        else resolve();
+      }, error => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    }).then(() => {
+      this.rejectSampleLoad = null;
+    }).catch(error => {
+      this.rejectSampleLoad = null;
+      this.loadPromise = null;
+      throw error;
+    });
+    await this.loadPromise;
   }
 
   now() { return Tone.now(); }
   mute(value: boolean) { this.drumChannel.mute = value; }
+  private setLevel(channel: Tone.Volume, percent: number) {
+    const value = Math.max(0, Math.min(100, percent));
+    channel.volume.value = value === 0 ? -60 : 20 * Math.log10(value / 100);
+  }
+  drumLevel(percent: number) { this.setLevel(this.drumChannel, percent); }
+  voiceLevel(percent: number) { this.setLevel(this.voiceChannel, percent); }
+  masterLevel(percent: number) { this.setLevel(this.output, percent); }
 
   async loadVoice(url: string | null): Promise<number | null> {
     const loadId = ++this.voiceLoadId;
@@ -88,6 +133,10 @@ export class DrumAudio {
     if (!this.voicePlayer) return;
     this.voicePlayer.stop(time);
     this.voicePlayer.start(time + 0.01, offset);
+  }
+
+  countIn(time: number, accented: boolean) {
+    this.countInSynth.triggerAttackRelease(accented ? 'C6' : 'G5', '32n', time, 0.35);
   }
 
   private play(group: SampleGroup, time: number): Tone.Player {
@@ -132,5 +181,18 @@ export class DrumAudio {
     this.players.stopAll();
     this.voicePlayer?.stop();
     this.openHat = null;
+  }
+
+  dispose() {
+    this.stop();
+    this.voiceLoadId++;
+    this.voicePlayer?.dispose();
+    this.voicePlayer = null;
+    this.players.dispose();
+    this.countInSynth.dispose();
+    this.drumChannel.dispose();
+    this.voiceChannel.dispose();
+    this.limiter.dispose();
+    this.output.dispose();
   }
 }

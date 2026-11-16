@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deleteVoiceStem, downloadVoiceStem, exportUrl, formatTime, isActive, request, uploadedJob, uploadVoiceStem, validateAudio, voiceStemUrl, type Job } from './api';
+import { deleteVoiceStem, downloadVoiceStem, exportUrl, formatTime, isActive, request, updateNotation, uploadedJob, uploadVoiceStem, validateAudio, voiceStemUrl, type Job } from './api';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -67,6 +67,20 @@ it('surfaces errors from vocal downloads and deletions', async () => {
     .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Storage unavailable' }), { status: 500 })));
   await expect(downloadVoiceStem('job-id', 'voice.mp3', new AbortController().signal)).rejects.toThrow('Vocal not found');
   await expect(deleteVoiceStem('job-id')).rejects.toThrow('Storage unavailable');
+});
+
+it('sends validated notation settings to the cached score rebuild endpoint', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'NOTATION_GENERATION' })));
+  vi.stubGlobal('fetch', fetchMock);
+  const options = {
+    show_dynamics: true, show_accents: true, show_sticking: true,
+    accent_threshold: 105, measures_per_system: 3,
+    sections: [{ start_measure: 1, end_measure: 4, label: 'Intro', repeat: true }],
+  };
+  await updateNotation('job/id', options);
+  expect(fetchMock).toHaveBeenCalledWith('/drum-sheet-api/api/transcriptions/job%2Fid/notation', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options),
+  });
 });
 
 it('uploads a vocal stem with progress and surfaces server errors', async () => {

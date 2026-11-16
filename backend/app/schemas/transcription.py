@@ -23,6 +23,39 @@ class ErrorResponse(APIModel):
     code: str = Field(description="Machine-readable error category.", examples=["http_404"])
 
 
+class NotationSection(APIModel):
+    """A labeled measure range, optionally bracketed with repeat marks."""
+
+    start_measure: int = Field(ge=1)
+    end_measure: int = Field(ge=1)
+    label: str = Field(min_length=1, max_length=40)
+    repeat: bool = False
+
+    @field_validator("label")
+    @classmethod
+    def nonblank_label(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Section labels cannot be blank.")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def valid_measure_range(self) -> Self:
+        if self.end_measure < self.start_measure:
+            raise ValueError("Section end_measure must be at least start_measure.")
+        return self
+
+
+class NotationOptions(APIModel):
+    """Persisted engraving controls; they never change the underlying events."""
+
+    show_dynamics: bool = True
+    show_accents: bool = True
+    show_sticking: bool = False
+    accent_threshold: int = Field(default=100, ge=1, le=127)
+    measures_per_system: int = Field(default=4, ge=1, le=8)
+    sections: list[NotationSection] = Field(default_factory=list, max_length=100)
+
+
 class JobUploadResponse(APIModel):
     """An accepted upload; transcription has not been started yet."""
 
@@ -46,7 +79,12 @@ class JobStatusResponse(APIModel):
     bpm: float | None = Field(default=None, gt=0, description="Quarter notes per minute, or null before rhythm analysis.", examples=[119.8])
     time_signature: str = Field(description="Score meter as numerator/denominator.", examples=["4/4"])
     duration_sec: float | None = Field(default=None, ge=0, description="Recording duration after preparation.", examples=[32.5])
+    total_measures: int | None = Field(default=None, ge=0, description="Number of measures in the current score.")
     quality_metrics: dict[str, Any] | None = Field(default=None, description="Gain-preserving audio diagnostics, or null before analysis.", examples=[{"rms_dbfs": -18.4, "is_clipping": False, "is_suitable": True, "warnings": []}])
+    notation_options: NotationOptions = Field(default_factory=NotationOptions, description="Current engraving options; changes are non-destructive to detected hits.")
+    failed_stage: str | None = Field(default=None, description="Pipeline stage that failed, when known.")
+    retry_stage: str | None = Field(default=None, description="Safe retry action: cached notation generation or full transcription.")
+    estimated_wait_seconds: int | None = Field(default=None, ge=0, description="Approximate queue wait based on recent completed jobs; null when not estimable.")
     error_message: str | None = Field(default=None, description="User-readable failure message; internal tracebacks are not returned.", examples=["No reliable drum events were detected in this recording."])
     available_exports: dict[str, bool] = Field(description="Whether each current export exists on disk. False while score changes await regeneration.", examples=[{"midi": True, "musicxml": True, "pdf": False}])
     updated_at: datetime = Field(description="Last committed job update timestamp.", examples=["2026-11-13T10:01:14Z"])

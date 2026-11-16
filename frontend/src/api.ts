@@ -1,3 +1,36 @@
+export interface NotationSection {
+  start_measure: number;
+  end_measure: number;
+  label: string;
+  repeat: boolean;
+}
+
+export interface NotationOptions {
+  show_dynamics: boolean;
+  show_accents: boolean;
+  show_sticking: boolean;
+  accent_threshold: number;
+  measures_per_system: number;
+  sections: NotationSection[];
+}
+
+export const defaultNotationOptions: NotationOptions = {
+  show_dynamics: true,
+  show_accents: true,
+  show_sticking: false,
+  accent_threshold: 100,
+  measures_per_system: 4,
+  sections: [],
+};
+
+export interface QualityMetrics {
+  rms_dbfs?: number;
+  peak_dbfs?: number;
+  is_clipping?: boolean;
+  is_suitable?: boolean;
+  warnings?: string[];
+}
+
 export interface Job {
   job_id: string;
   status: string;
@@ -7,6 +40,12 @@ export interface Job {
   bpm: number | null;
   time_signature: string;
   duration_sec: number | null;
+  total_measures: number | null;
+  quality_metrics: QualityMetrics | null;
+  notation_options: NotationOptions;
+  failed_stage: string | null;
+  retry_stage: string | null;
+  estimated_wait_seconds: number | null;
   error_message: string | null;
   available_exports: { midi: boolean; musicxml: boolean; pdf: boolean };
   updated_at: string;
@@ -22,6 +61,9 @@ export function uploadedJob(value: { job_id: string; status: string; original_fi
     job_id: value.job_id, status: value.status, original_filename: value.original_filename,
     updated_at: value.created_at, progress_percent: 0, bpm: null, duration_sec: null,
     time_signature: '4/4', error_message: null, voice_filename: null,
+    total_measures: null,
+    quality_metrics: null, notation_options: defaultNotationOptions,
+    failed_stage: null, retry_stage: null, estimated_wait_seconds: null,
     available_exports: { midi: false, musicxml: false, pdf: false },
   };
 }
@@ -139,4 +181,12 @@ export async function deleteVoiceStem(jobId: string): Promise<void> {
     const body = await response.json().catch(() => null);
     throw new Error(errorText(body, `The vocal could not be removed (${response.status}).`));
   }
+}
+
+export function updateNotation(jobId: string, options: NotationOptions): Promise<Job> {
+  return request<Job>(`/transcriptions/${encodeURIComponent(jobId)}/notation`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  });
 }

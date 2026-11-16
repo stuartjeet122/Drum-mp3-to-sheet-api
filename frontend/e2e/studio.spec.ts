@@ -9,6 +9,9 @@ const id = '9d199c08-11bf-4c48-9a7a-aaef1f688531';
 const baseJob = {
   job_id: id, status: 'COMPLETED', progress_percent: 100,
   original_filename: 'Sunday pocket.wav', bpm: 92, time_signature: '4/4', duration_sec: 8,
+  total_measures: 4, quality_metrics: null,
+  notation_options: { show_dynamics: true, show_accents: true, show_sticking: false, accent_threshold: 100, measures_per_system: 4, sections: [] },
+  failed_stage: null, retry_stage: null, estimated_wait_seconds: null,
   error_message: null, voice_filename: null, updated_at: '2026-11-16T10:00:00Z',
   available_exports: { midi: true, musicxml: true, pdf: true },
 };
@@ -81,6 +84,7 @@ test('desktop studio renders a top-down kit and functional demo controls', async
   await expect.poll(() => canvasColors(page, '.top-kit-svg')).toBeGreaterThan(45);
   await page.screenshot({ path: testInfo.outputPath('desktop-studio.png'), fullPage: true });
   await page.getByRole('button', { name: 'Play drums', exact: true }).click();
+  await expect(page.locator('.audio-load-status.ready')).toHaveText('Audio ready', { timeout: 25000 });
   await expect(page.getByRole('button', { name: 'Pause playback', exact: true })).toBeVisible();
   await expect.poll(async () => Number(await page.getByRole('slider', { name: 'Playback position' }).inputValue())).toBeGreaterThan(0.3);
   await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
@@ -93,6 +97,18 @@ test('desktop studio renders a top-down kit and functional demo controls', async
   await page.getByRole('combobox', { name: 'Playback speed' }).selectOption('0.75');
   await page.getByRole('button', { name: 'Snare', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Snare', exact: true })).toHaveClass(/is-hit/);
+  await page.getByText('Independent mixer', { exact: true }).click();
+  const drumVolume = page.getByRole('slider', { name: 'Drum volume' });
+  await expect(drumVolume).toHaveValue('100');
+  await drumVolume.press('ArrowLeft');
+  await expect(drumVolume).toHaveValue('99');
+  await page.getByText('Humanize playback', { exact: true }).click();
+  const swing = page.getByRole('slider', { name: 'Swing' });
+  await swing.press('ArrowRight');
+  await expect(swing).toHaveValue('1');
+  await page.getByRole('button', { name: 'Start section loop' }).click();
+  await expect(page.getByRole('button', { name: 'Stop section loop' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Stop section loop' }).click();
   expect(errors).toEqual([]);
 });
 
@@ -163,7 +179,7 @@ test('upload starts once, polls real stages, and displays downloadable PDF/MIDI/
   await expect(page.locator('.drum-pad')).toHaveCount(3);
   await expect(page.getByRole('link', { name: 'MusicXML', exact: true })).toHaveAttribute('href', /export\/musicxml$/);
   await expect(page.getByRole('link', { name: 'MIDI', exact: true })).toHaveAttribute('href', /export\/midi$/);
-  await expect(page.getByRole('img', { name: 'Drum sheet music, page 1' })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Drum sheet music, page 1' })).toBeVisible({ timeout: 15000 });
   await expect.poll(() => canvasColors(page, '.pdf-paper-area canvas')).toBeGreaterThan(3);
   await expect(page.getByRole('heading', { name: 'Sunday pocket', exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('completed-score.png'), fullPage: true });
@@ -196,10 +212,54 @@ test('invalid file is rejected before upload and missing PDF keeps other exports
   await page.getByLabel('Choose drum recording').setInputFiles({ name: 'bad.txt', mimeType: 'text/plain', buffer: Buffer.from('not audio') });
   await expect(page.getByRole('alert')).toContainText('Choose a WAV');
   await page.getByRole('button', { name: 'Open Sunday pocket.wav' }).click();
-  await page.getByRole('link', { name: 'Play & score' }).click();
+  await expect(page).toHaveURL(/page=play/);
+  await expect(page.getByText('Now playing: Sunday pocket.wav')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'The groove is ready.' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'MIDI', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'PDF', exact: true })).toBeDisabled();
+});
+
+test('notation controls submit rich markings and rebuild options for the selected song', async ({ page }) => {
+  await fixtures(page);
+  let savedOptions: unknown;
+  await page.route(`**/transcriptions/${id}/notation`, async route => {
+    savedOptions = route.request().postDataJSON();
+    await route.fulfill({ json: { ...baseJob, status: 'NOTATION_GENERATION', progress_percent: 95, notation_options: savedOptions } });
+  });
+  await page.goto(`./?page=play#job=${id}`);
+  await expect(page.getByRole('heading', { name: 'Notation & drum layout' })).toBeVisible();
+  await page.getByLabel('R/L sticking').check();
+  await page.getByLabel('Measures per system').selectOption('3');
+  await page.getByRole('button', { name: 'Add section' }).click();
+  await page.getByLabel('Label').fill('Intro');
+  await page.getByLabel('Repeat').check();
+  await page.getByRole('button', { name: 'Apply notation & rebuild' }).click();
+  await expect.poll(() => savedOptions).toMatchObject({
+    show_sticking: true,
+    measures_per_system: 3,
+    sections: [{ start_measure: 1, end_measure: 4, label: 'Intro', repeat: true }],
+  });
+});
+
+test('job diagnostics explain a failed stage and expose its safe retry', async ({ page }) => {
+  const failedJob = {
+    ...baseJob, status: 'FAILED', progress_percent: 95, failed_stage: 'NOTATION_GENERATION',
+    retry_stage: 'NOTATION_GENERATION', error_message: 'Score rendering failed.',
+    available_exports: { midi: false, musicxml: false, pdf: false },
+  };
+  await fixtures(page, [failedJob]);
+  await page.route(`**/transcriptions/${id}/status`, route => route.fulfill({ json: failedJob }));
+  let retryStatus = '';
+  await page.route(`**/transcriptions/${id}/start`, async route => {
+    retryStatus = route.request().method();
+    await route.fulfill({ status: 202, json: { ...baseJob, status: 'NOTATION_GENERATION', progress_percent: 95 } });
+  });
+  await page.goto(`./?page=play#job=${id}`);
+  await expect(page.getByText('Failed during Writing your score.')).toBeVisible();
+  await expect(page.getByText(/rebuild notation without rerunning transcription/)).toBeVisible();
+  await page.getByRole('button', { name: 'Retry score generation' }).click();
+  await expect.poll(() => retryStatus).toBe('POST');
+  await expect(page.getByText('Approximate time remaining')).toHaveCount(0);
 });
 
 test('mobile completed score renders, zooms, and restores after reload', async ({ page }, testInfo) => {

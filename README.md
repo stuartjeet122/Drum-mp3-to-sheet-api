@@ -291,6 +291,7 @@ do not bound decoded recording duration or inference RAM.
 | DELETE | `/api/transcriptions/{job_id}` | Remove manifest/events and job-owned files; 204 |
 | GET | `/api/transcriptions/{job_id}/events?include_raw=false` | Canonical hits, optionally raw predictions |
 | PATCH | `/api/transcriptions/{job_id}/events` | Atomic bulk editing and optional regeneration |
+| PATCH | `/api/transcriptions/{job_id}/notation` | Set dynamics, accents, sticking, sections/repeats, and measures per system; queue cached regeneration |
 | GET | `/api/transcriptions/{job_id}/export/{format}` | Current `midi`, `musicxml`, or `pdf` attachment |
 
 Upload with Swagger's file chooser, or:
@@ -313,6 +314,10 @@ on deletion, never the chosen parent directories or unrelated user files.
 Start reserves `PREPROCESSING` at 0% before dispatch. Duplicate starts and all
 edits/deletions while queued/running return 409. Completed/scored jobs cannot be
 fully restarted: edit/regenerate or upload a new recording to preserve manual work.
+Status responses include the failed stage, a safe retry action, and an approximate
+wait estimate when recent completed-job durations are available. A failed
+notation rebuild resumes from cached notation only when prepared audio and its
+rhythm cache are present; otherwise retry starts a full transcription.
 
 PATCH accepts, for example:
 

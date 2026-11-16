@@ -78,6 +78,15 @@ class TranscriptionJob(BaseModel):
     musicxml_path: Path | None = None
     pdf_path: Path | None = None
     quality_metrics: dict[str, Any] | None = None
+    notation_options: dict[str, Any] = Field(default_factory=lambda: {
+        "show_dynamics": True,
+        "show_accents": True,
+        "show_sticking": False,
+        "accent_threshold": 100,
+        "measures_per_system": 4,
+        "sections": [],
+    })
+    failed_stage: str | None = None
     error_message: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

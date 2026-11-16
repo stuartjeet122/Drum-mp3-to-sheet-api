@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -98,6 +99,7 @@ class DrumTranscriptionPipeline:
     def _export(
         self, transcription: MusicalTranscription, export_dir: Path,
         title: str, deadline: float | None = None,
+        notation_options: dict[str, Any] | None = None,
     ) -> tuple[Path, Path, Path | None]:
         """Stage mandatory formats together; a PDF failure must not discard them."""
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +110,8 @@ class DrumTranscriptionPipeline:
         with TemporaryDirectory(prefix="exports-", dir=export_dir) as directory:
             staging = Path(directory)
             midi = export_to_midi(transcription, staging / midi_path.name)
-            xml = export_to_musicxml(transcription, staging / musicxml_path.name, title=title)
+            xml = export_to_musicxml(transcription, staging / musicxml_path.name, title=title,
+                                     notation_options=notation_options)
             timeout = 60 if deadline is None else min(1, max(0, math.floor(deadline - monotonic())))
             if timeout:
                 try:
@@ -130,6 +133,7 @@ class DrumTranscriptionPipeline:
     def run_full_pipeline(
         self, job_id: str, input_audio_path: Path, work_dir: Path, export_dir: Path,
         on_progress: ProgressCallback | None = None,
+        notation_options: dict[str, Any] | None = None,
     ) -> PipelineArtifacts:
         """Run each stage synchronously, closing each model before loading the next.
 
@@ -162,7 +166,10 @@ class DrumTranscriptionPipeline:
         grid = LibrosaBeatTracker().track(paths.original_wav, fused)
         transcription = quantize_events_to_grid(fused, grid)
         progress("NOTATION_GENERATION", 95)
-        midi, xml, pdf = self._export(transcription, export_dir, "Drum Transcription")
+        midi, xml, pdf = self._export(
+            transcription, export_dir, "Drum Transcription",
+            notation_options=notation_options,
+        )
         _cache_rhythm(paths.original_wav, transcription)
         artifacts = PipelineArtifacts(
             job_id=job_id, original_wav=paths.original_wav, analysis_wav=paths.analysis_wav,
@@ -176,6 +183,7 @@ class DrumTranscriptionPipeline:
     def regenerate_exports_from_events(
         self, job_id: str, events: list[FusedEvent], original_wav_path: Path,
         export_dir: Path, title: str = "Drum Transcription", bpm_override: float | None = None,
+        notation_options: dict[str, Any] | None = None,
     ) -> ExportResult:
         """Requantize edits using cached rhythm or an explicit constant BPM.
 
@@ -201,6 +209,9 @@ class DrumTranscriptionPipeline:
                                                math.ceil(duration * grid.bpm / 60 *
                                                          grid.time_signature_denominator / 4 /
                                                          grid.time_signature_numerator))
-        midi, xml, pdf = self._export(transcription, export_dir, title, deadline=deadline)
+        midi, xml, pdf = self._export(
+            transcription, export_dir, title, deadline=deadline,
+            notation_options=notation_options,
+        )
         logger.info("Regenerated notation for job %s", job_id)
         return transcription, midi, xml, pdf

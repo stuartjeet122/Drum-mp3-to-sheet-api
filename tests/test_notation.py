@@ -145,6 +145,36 @@ def test_musicxml_all_heads_have_correct_gm_reference(tmp_path: Path, transcript
     assert count == len(transcription.events)
 
 
+def test_musicxml_notation_options_add_dynamics_accents_sticking_sections_and_layout(
+    tmp_path: Path, transcription,
+) -> None:
+    transcription.events = [
+        event(DrumInstrument.KICK, velocity=110),
+        event(DrumInstrument.CLOSED_HIHAT, velocity=75),
+        event(DrumInstrument.SNARE, 2, velocity=52),
+    ]
+    output = export_to_musicxml(transcription, tmp_path / "annotated.musicxml", notation_options={
+        "show_dynamics": True,
+        "show_accents": True,
+        "show_sticking": True,
+        "accent_threshold": 100,
+        "measures_per_system": 1,
+        "sections": [
+            {"start_measure": 1, "end_measure": 2, "label": "Intro", "repeat": True},
+            {"start_measure": 1, "end_measure": 2, "label": "Intro B", "repeat": True},
+        ],
+    })
+    root = ET.parse(output).getroot()
+    assert root.find(".//dynamics") is not None
+    words = [entry.text for entry in root.findall(".//direction-type/words")]
+    assert len(root.findall(".//articulations/accent")) == 1
+    assert "R+L" in words and "Intro" in words and "Intro B" in words
+    assert root.find(".//measure[@number='2']/print[@new-system='yes']") is not None
+    assert len(root.findall(".//repeat")) == 2
+    parsed = converter.parse(output)
+    assert len(list(parsed.parts[0].getElementsByClass(stream.Measure))) == 2
+
+
 def test_musicxml_overlap_and_cross_bar_ties(tmp_path: Path, transcription) -> None:
     transcription.events = [event(DrumInstrument.SNARE, duration_quarters=1),
                             event(DrumInstrument.CLOSED_HIHAT, 1.5, duration_quarters=0.25),

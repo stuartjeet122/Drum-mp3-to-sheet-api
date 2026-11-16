@@ -37,8 +37,9 @@ deployment is recommended, especially behind an authenticated reverse proxy.
   starts inference, then polls committed job status without overlapping polls.
 - Pipeline stages, failures and retry actions use the API's actual responses.
   A queue failure retries the existing uploaded job, not a duplicate upload.
-- Recent server jobs can be reopened. The last selected job ID is retained in
-  the URL fragment and browser storage; the audio itself is not stored there.
+- Recent server jobs open directly in Play & score. The last selected job ID is
+  retained in the URL fragment and browser storage; the audio itself is not
+  stored there.
 - Completed PDF scores render locally with page navigation and zoom. Current
   PDF, MIDI and MusicXML downloads are only enabled when the API reports them.
   A missing optional PDF does not hide the other formats.
@@ -48,6 +49,18 @@ deployment is recommended, especially behind an authenticated reverse proxy.
   the supported drum parts present in its MIDI. Unrecognized pitches are not
   misplayed as rides. Play/pause, restart, seek, loop, mute and speed controls are local;
   they do not submit processing jobs. The built-in groove is explicitly a demo.
+- Drum, vocal and master levels are independently adjustable. Sample loading
+  reports its state, times out or surfaces download errors, and can be retried.
+- Playback-only humanize controls adjust swing, timing, velocity and
+  quantization without changing the source MIDI or generated exports.
+- Practice mode loops a selected measure range, provides a count-in and optional
+  tempo ramp, and remembers completed loop cycles per recording on this device.
+- Notation controls can add measure dynamics, accent articulations, R/L sticking,
+  labeled/repeating sections, and choose measures per system. Applying them
+  rebuilds the score from cached events and rhythm data without rerunning AI.
+- Job diagnostics show the failed stage, audio warnings and an approximate wait
+  when recent job history supports an estimate. A failed notation rebuild can
+  retry only that stage when its prepared audio and rhythm cache are available.
 - On the Play & score page, optionally add a separate MP3 vocal stem. It follows
   the drum player's play, pause, seek, loop and speed controls. The vocal file is
   uploaded to the selected recording's isolated server folder beside its drum
