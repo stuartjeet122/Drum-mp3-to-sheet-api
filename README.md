@@ -12,6 +12,15 @@ systemd deployment with a real end-to-end smoke client.
 `requirements.txt` pins CPU-only production dependencies; `pyproject.toml`
 retains version ranges for development.
 
+## Drum Studio Website
+
+[Backbeat](frontend/README.md) is the dark-mode web interface: audio upload,
+live transcription progress, an embedded PDF score, MIDI/MusicXML downloads,
+and a playable 3D drum kit driven by the exported MIDI. Run `npm ci` and
+`npm run dev` from `frontend/`, then open http://127.0.0.1:5173/drum-studio/.
+The frontend deployment instructions preserve the existing API and Portainer
+stack. It expects drum stems; it does not add mixed-song source separation.
+
 ## Docker Quick Start
 
 Install Docker Engine and Compose v2 on a Linux x86_64 host. Place compatible,
@@ -26,7 +35,7 @@ curl --fail http://127.0.0.1:8000/api/health
 ```
 
 Open http://127.0.0.1:8000/docs on the Docker host. From another computer use an
-SSH tunnel, not a publicly exposed port. No frontend or `.env` is required;
+SSH tunnel, not a publicly exposed port. The frontend is optional; no `.env` is required.
 Compose provides private Redis automatically and disables cross-origin access.
 Uploads/jobs/exports and Redis data use persistent named volumes. Do not run
 `docker compose down -v` on data you want to keep. Model weights are not bundled.
