@@ -34,6 +34,8 @@ class RequestSizeLimitMiddleware:
         path, method = scope["path"].rstrip("/"), scope["method"]
         if path == "/api/transcriptions" and method == "POST":
             limit = get_settings().MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 64 * 1024
+        elif path.startswith("/api/transcriptions/") and path.endswith("/voice") and method == "POST":
+            limit = get_settings().MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 64 * 1024
         elif path.startswith("/api/transcriptions/") and path.endswith("/events") and method == "PATCH":
             limit = 1024 * 1024
         else:
@@ -86,12 +88,13 @@ app = FastAPI(
 ## CPU-Only Drum Transcription
 
 1. **Upload** an isolated drum stem as multipart audio. Uploading never starts inference.
-2. **Start** a Celery job, then poll its committed status and progress.
-3. **Analyze** gain-preserving audio quality, sequential ADTOF/OaF detections,
+2. Optionally save a vocal MP3 beside the drum stem for synchronized local playback.
+3. **Start** a Celery job, then poll its committed status and progress.
+4. **Analyze** gain-preserving audio quality, sequential ADTOF/OaF detections,
    acoustic onset/velocity refinement, fusion, and beat-grid quantization.
-4. **Edit** FUSED/MANUAL hits atomically, retaining expressive timing and immutable
+5. **Edit** FUSED/MANUAL hits atomically, retaining expressive timing and immutable
    raw predictions. Instrument edits automatically update General MIDI pitches.
-5. **Export** expressive MIDI, engraved MusicXML, and optional headless MuseScore PDF.
+6. **Export** expressive MIDI, engraved MusicXML, and optional headless MuseScore PDF.
 
 Background processing stages: `PREPROCESSING`, `QUALITY_ANALYSIS`,
 `ADTOF_TRANSCRIPTION`, `OAF_VERIFICATION`, `EVENT_REFINEMENT`, `RHYTHM_ANALYSIS`,

@@ -3,7 +3,7 @@
 from pathlib import Path
 import shutil
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile
 
@@ -112,6 +112,57 @@ def save_uploaded_stem(job_id: UUID, upload_file: UploadFile, upload_directory: 
         shutil.rmtree(directory)
         raise
     return destination, size
+
+
+def save_uploaded_voice_stem(
+    job_id: UUID, upload_file: UploadFile, upload_directory: str = "uploads",
+) -> tuple[Path, int, str]:
+    """Persist an MP3 beside its drum stem using a unique staged file."""
+    filename = clean_filename(upload_file.filename)
+    if Path(filename).suffix.lower() != ".mp3":
+        raise HTTPException(415, "Voice stems must be MP3 files.")
+    maximum = get_settings().MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if upload_file.size is not None and upload_file.size > maximum:
+        raise HTTPException(413, "Voice stem exceeds the configured upload size limit.")
+    directory = job_directory(resolve_user_directory(upload_directory), job_id)
+    if not directory.is_dir():
+        raise HTTPException(404, "The drum stem storage for this job no longer exists.")
+
+    identifier = uuid4()
+    destination = directory / f"voice-{identifier}.mp3"
+    staged = directory / f".{identifier}.tmp"
+    size = 0
+    try:
+        upload_file.file.seek(0)
+        with staged.open("xb") as output:
+            while chunk := upload_file.file.read(CHUNK_SIZE):
+                size += len(chunk)
+                if size > maximum:
+                    raise HTTPException(413, "Voice stem exceeds the configured upload size limit.")
+                if size == len(chunk) and not _valid_header(".mp3", chunk[:16]):
+                    raise HTTPException(415, "Voice stem does not contain a valid MP3 header.")
+                output.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "Voice stem upload is empty.")
+        staged.replace(destination)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    return destination, size, filename
+
+
+def get_voice_file_path(
+    job_id: UUID, voice_path: Path | None, upload_directory: str = "uploads", *, require_exists: bool = True,
+) -> Path:
+    """Resolve only a job-owned vocal file, rejecting redirected manifests."""
+    if voice_path is None:
+        raise HTTPException(404, "This recording has no saved voice stem.")
+    directory = job_directory(resolve_user_directory(upload_directory), job_id)
+    if voice_path.is_symlink() or voice_path.resolve().parent != directory.resolve():
+        raise HTTPException(400, "Unsafe voice stem storage path.")
+    if require_exists and not voice_path.is_file():
+        raise HTTPException(404, "This recording has no saved voice stem.")
+    return voice_path
 
 
 def get_export_file_path(job_id: UUID, export_format: ExportFormat, output_directory: str = "exports") -> Path:

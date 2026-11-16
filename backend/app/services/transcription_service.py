@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 import logging
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile
@@ -10,6 +11,7 @@ from fastapi import HTTPException, UploadFile
 from backend.app.models import DrumEventRecord, EventSource, JobStatus, TranscriptionJob
 from backend.app.schemas.transcription import (
     BulkEventPatchRequest, DrumEventOut, EventsListResponse, JobStatusResponse, JobUploadResponse,
+    VoiceStemUploadResponse,
 )
 from backend.app.services import storage_service as storage
 from backend.app.services.job_store import get_job_store
@@ -56,9 +58,18 @@ def status_response(job: TranscriptionJob) -> JobStatusResponse:
             except HTTPException as exc:
                 if exc.status_code != 404:
                     raise
+    voice_filename = None
+    if job.stored_voice_path is not None and job.voice_filename is not None:
+        try:
+            storage.get_voice_file_path(job.id, job.stored_voice_path, job.upload_directory)
+            voice_filename = job.voice_filename
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
     return JobStatusResponse(
         job_id=job.id, status=job.status, progress_percent=job.progress_percent,
-        original_filename=job.original_filename, bpm=job.bpm, time_signature=job.time_signature,
+        original_filename=job.original_filename, voice_filename=voice_filename,
+        bpm=job.bpm, time_signature=job.time_signature,
         duration_sec=job.duration_sec, quality_metrics=job.quality_metrics,
         error_message=job.error_message, available_exports=available, updated_at=job.updated_at,
         upload_directory=job.upload_directory, output_directory=job.output_directory,
@@ -85,6 +96,58 @@ def upload_job(upload: UploadFile, upload_directory: str = "uploads", output_dir
     return JobUploadResponse(job_id=job.id, status=job.status, original_filename=filename,
                               file_size_bytes=size, created_at=job.created_at,
                               upload_directory=upload_directory, output_directory=output_directory)
+
+
+def upload_voice_stem(job_id: UUID, upload: UploadFile) -> VoiceStemUploadResponse:
+    """Replace the optional MP3 vocal stem without exposing its server path."""
+    job = require_job(job_id)
+    if not job.stored_audio_path.is_file():
+        raise HTTPException(409, "The drum stem for this job is no longer available.")
+    path, size, filename = storage.save_uploaded_voice_stem(job_id, upload, job.upload_directory)
+    previous_path: Path | None = None
+    try:
+        with edit_job(job_id) as current:
+            previous_path = storage.get_voice_file_path(
+                job_id, current.stored_voice_path, current.upload_directory, require_exists=False,
+            ) if current.stored_voice_path is not None else None
+            current.stored_voice_path = path
+            current.voice_filename = filename
+    except Exception:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not clean failed voice upload for job %s", job_id)
+        raise
+    if previous_path is not None and previous_path != path:
+        try:
+            previous_path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not remove replaced voice stem for job %s", job_id)
+    return VoiceStemUploadResponse(job_id=job_id, voice_filename=filename, file_size_bytes=size)
+
+
+def voice_stem_path(job_id: UUID) -> tuple[TranscriptionJob, Path]:
+    """Return a validated saved vocal path from the job manifest."""
+    job = require_job(job_id)
+    return job, storage.get_voice_file_path(job_id, job.stored_voice_path, job.upload_directory)
+
+
+def delete_voice_stem(job_id: UUID) -> None:
+    """Clear the manifest reference, then remove only its job-owned vocal file."""
+    previous_path: Path | None = None
+    with edit_job(job_id) as job:
+        if job.stored_voice_path is not None:
+            previous_path = storage.get_voice_file_path(
+                job_id, job.stored_voice_path, job.upload_directory, require_exists=False,
+            )
+        job.stored_voice_path = None
+        job.voice_filename = None
+    if previous_path is not None:
+        try:
+            previous_path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.exception("Could not remove voice stem for job %s", job_id)
+            raise HTTPException(500, "Voice stem metadata was cleared, but its file could not be removed.") from exc
 
 
 def _dispatch(job_id: UUID, *, regenerate: bool) -> None:

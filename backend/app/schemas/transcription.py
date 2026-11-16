@@ -42,6 +42,7 @@ class JobStatusResponse(APIModel):
     status: JobStatus = Field(description="Current queued, processing, completed, or failed state.", examples=["RHYTHM_ANALYSIS"])
     progress_percent: int = Field(ge=0, le=100, description="Most recently committed pipeline progress.", examples=[85])
     original_filename: str = Field(description="Display/download source filename.", examples=["rehearsal-drums.wav"])
+    voice_filename: str | None = Field(default=None, description="Optional MP3 voice stem saved with this recording.", examples=["rehearsal-voice.mp3"])
     bpm: float | None = Field(default=None, gt=0, description="Quarter notes per minute, or null before rhythm analysis.", examples=[119.8])
     time_signature: str = Field(description="Score meter as numerator/denominator.", examples=["4/4"])
     duration_sec: float | None = Field(default=None, ge=0, description="Recording duration after preparation.", examples=[32.5])
@@ -51,6 +52,14 @@ class JobStatusResponse(APIModel):
     updated_at: datetime = Field(description="Last committed job update timestamp.", examples=["2026-11-13T10:01:14Z"])
     upload_directory: str = Field(description="Server-side upload directory relative to storage/.", examples=["uploads"])
     output_directory: str = Field(description="Server-side export directory relative to storage/.", examples=["exports"])
+
+
+class VoiceStemUploadResponse(APIModel):
+    """A vocal MP3 attached to an existing transcription job."""
+
+    job_id: UUID = Field(description="Owning transcription job.", examples=["9d199c08-11bf-4c48-9a7a-aaef1f688531"])
+    voice_filename: str = Field(description="Sanitized client filename.", examples=["rehearsal-voice.mp3"])
+    file_size_bytes: int = Field(ge=1, description="Number of MP3 bytes persisted.", examples=[1760042])
 
 
 class DrumEventOut(APIModel):

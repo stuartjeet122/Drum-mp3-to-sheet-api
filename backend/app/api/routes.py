@@ -15,7 +15,7 @@ from backend.app.core.config import get_settings
 from backend.app.services.job_store import get_job_store
 from backend.app.schemas.transcription import (
     BulkEventPatchRequest, ErrorResponse, EventsListResponse, HealthCheckResponse,
-    JobStatusResponse, JobUploadResponse,
+    JobStatusResponse, JobUploadResponse, VoiceStemUploadResponse,
 )
 from backend.app.services import storage_service as storage
 from backend.app.services import transcription_service as service
@@ -24,7 +24,7 @@ from backend.app.services import transcription_service as service
 router = APIRouter(prefix="/api", responses={
     404: {"model": ErrorResponse, "description": "The job, event, or requested export does not exist."},
     409: {"model": ErrorResponse, "description": "Job is running, score is not ready, or operation conflicts with current state."},
-    413: {"model": ErrorResponse, "description": "Request body exceeds the configured audio or 1-MiB event-edit limit."},
+    413: {"model": ErrorResponse, "description": "Request body exceeds the configured drum/vocal audio or 1-MiB event-edit limit."},
     422: {"model": ErrorResponse, "description": "Invalid UUID, enum, pagination, or request fields."},
     500: {"model": ErrorResponse, "description": "Unexpected server failure; details are logged privately."},
     503: {"model": ErrorResponse, "description": "Worker queue or local storage is unavailable."},
@@ -112,6 +112,35 @@ def list_transcriptions(
 def transcription_status(job_id: JobID) -> JobStatusResponse:
     """Read persistent local job state rather than an expiring Celery result."""
     return service.status_response(service.require_job(job_id))
+
+
+@router.post("/transcriptions/{job_id}/voice", tags=["Transcriptions"], response_model=VoiceStemUploadResponse,
+             summary="Save or replace a vocal MP3 beside this recording's drum stem",
+             responses={200: {"description": "Vocal MP3 persisted in the job's isolated upload folder."},
+                        400: {"model": ErrorResponse, "description": "Empty file or invalid filename."},
+                        413: {"model": ErrorResponse, "description": "Voice stem exceeds MAX_UPLOAD_SIZE_MB."},
+                        415: {"model": ErrorResponse, "description": "File is not a valid MP3."}})
+def upload_voice(job_id: JobID, file: Annotated[UploadFile, File(description="MP3 vocal stem to save with this recording.")]) -> VoiceStemUploadResponse:
+    """Save an optional playback stem without starting or changing transcription."""
+    return service.upload_voice_stem(job_id, file)
+
+
+@router.get("/transcriptions/{job_id}/voice", tags=["Transcriptions"], response_class=FileResponse,
+            summary="Download this recording's saved vocal MP3")
+def download_voice(job_id: JobID) -> FileResponse:
+    """Return the vocal attachment without revealing its server-side path."""
+    job, path = service.voice_stem_path(job_id)
+    return FileResponse(path, media_type="audio/mpeg", filename=job.voice_filename or "voice.mp3",
+                        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.delete("/transcriptions/{job_id}/voice", tags=["Transcriptions"], status_code=204,
+               summary="Remove this recording's saved vocal MP3",
+               responses={204: {"description": "Vocal file and manifest metadata removed."}})
+def remove_voice(job_id: JobID) -> Response:
+    """Remove only the vocal stem; the associated drum recording is retained."""
+    service.delete_voice_stem(job_id)
+    return Response(status_code=204)
 
 
 @router.delete("/transcriptions/{job_id}", tags=["Transcriptions"], status_code=204,

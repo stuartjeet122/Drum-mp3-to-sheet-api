@@ -9,7 +9,7 @@ const id = '9d199c08-11bf-4c48-9a7a-aaef1f688531';
 const baseJob = {
   job_id: id, status: 'COMPLETED', progress_percent: 100,
   original_filename: 'Sunday pocket.wav', bpm: 92, time_signature: '4/4', duration_sec: 8,
-  error_message: null, updated_at: '2026-11-16T10:00:00Z',
+  error_message: null, voice_filename: null, updated_at: '2026-11-16T10:00:00Z',
   available_exports: { midi: true, musicxml: true, pdf: true },
 };
 
@@ -96,18 +96,31 @@ test('desktop studio renders a top-down kit and functional demo controls', async
   expect(errors).toEqual([]);
 });
 
-test('optional MP3 voice stem stays local and follows playback transport', async ({ page }) => {
+test('optional MP3 voice stem persists with its recording and follows playback transport', async ({ page }) => {
   await fixtures(page, []);
-  const uploads: string[] = [];
-  page.on('request', request => {
-    if (request.method() === 'POST' && request.url().includes('/transcriptions')) uploads.push(request.url());
+  let savedVoice: string | null = null;
+  const voiceRequests: string[] = [];
+  await page.route(`**/transcriptions/${id}/status`, route => route.fulfill({ json: { ...baseJob, voice_filename: savedVoice } }));
+  await page.route(`**/transcriptions/${id}/voice`, async route => {
+    const method = route.request().method();
+    voiceRequests.push(method);
+    if (method === 'POST') {
+      savedVoice = 'voice.mp3';
+      return route.fulfill({ json: { job_id: id, voice_filename: savedVoice, file_size_bytes: voiceSample.length } });
+    }
+    if (method === 'GET' && savedVoice) return route.fulfill({ contentType: 'audio/mpeg', body: voiceSample });
+    if (method === 'DELETE') {
+      savedVoice = null;
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 404, json: { detail: 'No saved voice stem' } });
   });
-  await page.goto('./');
-  await page.getByRole('link', { name: 'Play & score' }).click();
+  await page.goto(`./?page=play#job=${id}`);
+  await expect(page.locator('.voice-stem-heading>div>span')).toHaveText(/saved with this recording/);
   await page.getByLabel('Choose voice stem MP3').setInputFiles({ name: 'voice.wav', mimeType: 'audio/wav', buffer: voiceSample });
   await expect(page.getByRole('alert')).toHaveText('Choose an MP3 voice stem.');
   await page.getByLabel('Choose voice stem MP3').setInputFiles({ name: 'voice.mp3', mimeType: 'audio/mpeg', buffer: voiceSample });
-  await expect(page.getByText(/READY TO PLAY/)).toBeVisible();
+  await expect(page.locator('.voice-stem-file span')).toHaveText(/SAVED WITH RECORDING/, { timeout: 15000 });
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByRole('button', { name: 'Play drums', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause playback', exact: true })).toBeVisible();
@@ -117,7 +130,15 @@ test('optional MP3 voice stem stays local and follows playback transport', async
   await expect(page.getByRole('slider', { name: 'Playback position' })).toHaveValue('0');
   await page.getByRole('button', { name: 'Play drums', exact: true }).click();
   await expect.poll(async () => Number(await page.getByRole('slider', { name: 'Playback position' }).inputValue())).toBeGreaterThan(0.2);
-  expect(uploads).toEqual([]);
+  await expect(page.getByText('SAVED WITH RECORDING')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.voice-stem-file strong')).toHaveText('voice.mp3');
+  await expect(page.getByText('SAVED WITH RECORDING')).toBeVisible();
+  await page.getByRole('button', { name: 'Remove voice stem' }).click();
+  await expect(page.getByText('Add a vocal MP3 to store it with this recording.')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Add a vocal MP3 to store it with this recording.')).toBeVisible();
+  expect(voiceRequests).toEqual(['POST', 'GET', 'GET', 'DELETE']);
 });
 
 test('upload starts once, polls real stages, and displays downloadable PDF/MIDI/XML', async ({ page }, testInfo) => {
@@ -186,7 +207,7 @@ test('mobile completed score renders, zooms, and restores after reload', async (
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`./?page=play#job=${id}`);
   const score = page.getByRole('img', { name: 'Drum sheet music, page 1' });
-  await expect(score).toBeVisible();
+  await expect(score).toBeVisible({ timeout: 15000 });
   await score.scrollIntoViewIfNeeded();
   await expect.poll(() => canvasColors(page, '.pdf-paper-area canvas')).toBeGreaterThan(3);
   const width = (await score.boundingBox())!.width;

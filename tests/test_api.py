@@ -97,6 +97,60 @@ def test_custom_directories_start_and_delete(api) -> None:
     assert client.get(f"/api/transcriptions/{identifier}/status").status_code == 404
 
 
+def test_voice_stem_is_saved_beside_drum_and_can_be_replaced_downloaded_and_removed(api) -> None:
+    client, store = api
+    identifier = uploaded(client, upload_directory="takes/input")
+    prefix = f"/api/transcriptions/{identifier}/voice"
+    first_audio = b"ID3" + b"\x00" * 7 + b"first vocal data"
+    response = client.post(prefix, files={"file": ("C:\\fakepath\\voice.mp3", first_audio, "audio/mpeg")})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"job_id": str(identifier), "voice_filename": "voice.mp3", "file_size_bytes": len(first_audio)}
+
+    job = store.read(identifier)
+    drum_directory = job.stored_audio_path.parent
+    first_path = job.stored_voice_path
+    assert first_path is not None and first_path.parent == drum_directory
+    assert job.voice_filename == "voice.mp3"
+    assert client.get(f"/api/transcriptions/{identifier}/status").json()["voice_filename"] == "voice.mp3"
+    download = client.get(prefix)
+    assert download.status_code == 200 and download.content == first_audio
+    assert download.headers["content-type"] == "audio/mpeg"
+    assert "voice.mp3" in download.headers["content-disposition"]
+    assert str(drum_directory) not in download.text
+
+    second_audio = b"ID3" + b"\x00" * 7 + b"replacement vocal"
+    response = client.post(prefix, files={"file": ("replacement.mp3", second_audio, "audio/mpeg")})
+    assert response.status_code == 200, response.text
+    second_path = store.read(identifier).stored_voice_path
+    assert second_path is not None and second_path != first_path and second_path.parent == drum_directory
+    assert not first_path.exists()
+    assert client.get(prefix).content == second_audio
+
+    assert client.delete(prefix).status_code == 204
+    assert not second_path.exists()
+    assert client.get(prefix).status_code == 404
+    assert client.get(f"/api/transcriptions/{identifier}/status").json()["voice_filename"] is None
+
+    client.post(prefix, files={"file": ("voice.mp3", first_audio, "audio/mpeg")})
+    saved_path = store.read(identifier).stored_voice_path
+    assert saved_path is not None
+    assert client.delete(f"/api/transcriptions/{identifier}").status_code == 204
+    assert not drum_directory.exists()
+    assert not saved_path.exists()
+
+
+def test_voice_stem_rejects_non_mp3_and_enforces_request_limit(api) -> None:
+    client, _ = api
+    identifier = uploaded(client)
+    prefix = f"/api/transcriptions/{identifier}/voice"
+    invalid = client.post(prefix, files={"file": ("voice.wav", b"RIFF1234WAVEdata", "audio/wav")})
+    assert invalid.status_code == 415
+    malformed = client.post(prefix, files={"file": ("voice.mp3", b"not an mp3", "audio/mpeg")})
+    assert malformed.status_code == 415
+    assert client.post(prefix, content=b"x" * (2 * 1024 * 1024)).status_code == 413
+    assert not list(storage.job_directory(storage.resolve_user_directory("uploads"), identifier).glob("voice-*"))
+
+
 @pytest.mark.parametrize("directory", ["../escape", "/etc", "jobs", "processed/cache", "C:\\audio", "uploads/../jobs", f"uploads/{uuid4()}"])
 def test_reject_unsafe_directories_before_upload(api, directory: str) -> None:
     client, store = api
@@ -159,6 +213,8 @@ def test_docs_health_storage_and_body_limits(api, monkeypatch: pytest.MonkeyPatc
     upload = spec["paths"]["/api/transcriptions"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
     fields = spec["components"]["schemas"][upload["$ref"].split("/")[-1]]["properties"]
     assert {"file", "upload_directory", "output_directory"} <= fields.keys()
+    assert "/api/transcriptions/{job_id}/voice" in spec["paths"]
+    assert "voice_filename" in spec["components"]["schemas"]["JobStatusResponse"]["properties"]
     assert client.get("/api/transcriptions/not-uuid/status").json()["code"] == "validation_error"
     response = client.post("/api/transcriptions", files={"file": ("bad.wav", b"bad header")})
     assert response.status_code == 415

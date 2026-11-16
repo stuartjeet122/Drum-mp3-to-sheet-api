@@ -3,7 +3,8 @@
 A responsive dark-mode workspace for the existing drum transcription API.
 React/TypeScript, Vite, Tone.js, @tonejs/midi and PDF.js. Fonts and
 the PDF worker are bundled locally; no CDN, analytics or third-party audio
-uploads are used. The existing Python API and Docker stack are unchanged.
+uploads are used. Server-persisted vocal stems use the existing Python API and
+storage volume; no additional services or containers are required.
 
 ## Local Development
 
@@ -49,8 +50,12 @@ deployment is recommended, especially behind an authenticated reverse proxy.
   they do not submit processing jobs. The built-in groove is explicitly a demo.
 - On the Play & score page, optionally add a separate MP3 vocal stem. It follows
   the drum player's play, pause, seek, loop and speed controls. The vocal file is
-  decoded and played locally in the browser; it is not sent to the transcription
-  API or stored after the page is closed.
+  uploaded to the selected recording's isolated server folder beside its drum
+  stem, then restored when that recording is reopened. The audio is decoded and
+  played locally in the browser; it is not part of transcription or score
+  generation. Use Remove voice stem to delete only the vocal copy. With no
+  selected recording, a vocal can be auditioned for the current session but is
+  not persisted.
 
 The current API expects an **isolated drum stem**. This frontend does not add
 source separation for mixed songs. The top-down kit uses the supported General
@@ -63,7 +68,8 @@ see `public/samples/drums/CREDITS.txt` for the source and included usage note.
 
 The production site consists only of static files. No persistent Node service,
 additional API container, Redis instance or Portainer stack is required.
-The existing Portainer updater does **not** deploy this frontend automatically.
+Deploy the backend voice-stem API changes before serving this frontend; the
+existing Portainer updater does **not** deploy static frontend files automatically.
 Publish these source files to Git before pulling on Ubuntu.
 
 After pulling `/opt/drum-docker`, build with installed Node 22.12+ using
@@ -126,7 +132,7 @@ Browser tests use installed Google Chrome by default. For Edge set
 `PLAYWRIGHT_CHANNEL=msedge`; for bundled Chromium install it with
 `npx playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`.
 Tests mock the management API and never submit real inference jobs. They cover
-upload/start/poll/completion, queue retries, local MP3 voice-stem playback,
+upload/start/poll/completion, queue retries, job-persistent MP3 voice-stem playback,
 MIDI parsing and playback controls,
 PDF rendering and mobile zoom, session restoration, export links, and responsive
 top-down kit rendering at 320, 390, 768 and 1440 pixels. Screenshots are saved under

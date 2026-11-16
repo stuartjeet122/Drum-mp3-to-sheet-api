@@ -46,33 +46,33 @@ export const DrumKit = forwardRef<DrumKitHandle, { onHit: (drum: Drum) => void; 
     <svg className="top-kit-svg" viewBox="0 0 680 430" role="group" aria-label={`Interactive top view of an acoustic drum kit with ${visibleDrums.length} pieces`}>
       <defs>
         <radialGradient id="head-surface" cx="38%" cy="28%" r="76%">
-          <stop offset="0" stopColor="#f4f4e9" />
-          <stop offset=".58" stopColor="#c9cabb" />
-          <stop offset=".88" stopColor="#a5a99d" />
-          <stop offset="1" stopColor="#73796f" />
+          <stop offset="0" stopColor="#f4f8ff" />
+          <stop offset=".58" stopColor="#c4d6eb" />
+          <stop offset=".88" stopColor="#91a8c2" />
+          <stop offset="1" stopColor="#536a84" />
         </radialGradient>
         <radialGradient id="kick-surface" cx="38%" cy="28%" r="78%">
-          <stop offset="0" stopColor="#e9e7da" />
-          <stop offset=".7" stopColor="#c5c1b2" />
-          <stop offset="1" stopColor="#8c897e" />
+          <stop offset="0" stopColor="#eaf4ff" />
+          <stop offset=".7" stopColor="#b5cbe1" />
+          <stop offset="1" stopColor="#728aa5" />
         </radialGradient>
         <radialGradient id="cymbal-surface" cx="38%" cy="31%" r="73%">
-          <stop offset="0" stopColor="#f8e6a9" />
-          <stop offset=".35" stopColor="#d8b962" />
-          <stop offset=".78" stopColor="#a98234" />
-          <stop offset="1" stopColor="#705322" />
+          <stop offset="0" stopColor="#f2fbff" />
+          <stop offset=".35" stopColor="#8be4ff" />
+          <stop offset=".78" stopColor="#397da5" />
+          <stop offset="1" stopColor="#173653" />
         </radialGradient>
         <linearGradient id="rim-surface" x1="0" y1="0" x2="1" y2="1">
-          <stop stopColor="#f2f3e8" />
-          <stop offset=".38" stopColor="#78817f" />
-          <stop offset=".68" stopColor="#d5d8d0" />
-          <stop offset="1" stopColor="#59615f" />
+          <stop stopColor="#edf7ff" />
+          <stop offset=".38" stopColor="#66839f" />
+          <stop offset=".68" stopColor="#cfe4f8" />
+          <stop offset="1" stopColor="#3c526d" />
         </linearGradient>
         <filter id="drum-shadow" x="-35%" y="-35%" width="170%" height="180%">
           <feDropShadow dx="0" dy="7" stdDeviation="7" floodColor="#000" floodOpacity=".42" />
         </filter>
         <pattern id="head-grain" width="12" height="12" patternUnits="userSpaceOnUse">
-          <circle cx="2" cy="3" r=".65" fill="#6b7066" opacity=".18" />
+          <circle cx="2" cy="3" r=".65" fill="#344b64" opacity=".18" />
           <circle cx="9" cy="8" r=".5" fill="#fff" opacity=".3" />
         </pattern>
       </defs>

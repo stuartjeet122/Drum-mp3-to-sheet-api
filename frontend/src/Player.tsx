@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSPropertie
 import { Activity, CirclePause, FileAudio, Headphones, LoaderCircle, Pause, Play, Repeat2, SkipBack, Upload, Volume2, VolumeX, X } from 'lucide-react';
 import type { DrumKitHandle } from './DrumKit';
 import { demoGroove, drumForNote, drums, type Drum, type Sequence } from './music';
-import { formatTime } from './api';
+import { deleteVoiceStem, downloadVoiceStem, formatTime, uploadVoiceStem } from './api';
 import type { DrumAudio } from './audio';
 
 const Kit = lazy(() => import('./DrumKit').then(module => ({ default: module.DrumKit })));
@@ -12,7 +12,16 @@ function DrumPads({ active, onHit, visible }: { active: Drum | null; onHit: (dru
   return <div className="drum-pads" style={{ '--pad-count': visible.length } as CSSProperties}>{visible.map(drum => <button key={drum.id} className={`drum-pad ${active === drum.id ? 'is-hit' : ''}`} onClick={() => onHit(drum.id)} title={`Play ${drum.name}`} style={{ '--pad-color': drum.color } as CSSProperties}><span className="pad-dot" />{drum.name}</button>)}</div>;
 }
 
-export default function Player({ sequence, title, loading }: { sequence: Sequence | null; title: string; loading: boolean }) {
+export default function Player({
+  sequence, title, loading, jobId, voiceFilename, onVoiceFilenameChange,
+}: {
+  sequence: Sequence | null;
+  title: string;
+  loading: boolean;
+  jobId: string | null;
+  voiceFilename: string | null;
+  onVoiceFilenameChange: (filename: string | null) => void;
+}) {
   const music = sequence || demo;
   const visibleDrums = useMemo(() => {
     if (!sequence) return drums;
@@ -36,6 +45,9 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
   const [voiceDuration, setVoiceDuration] = useState<number | null>(null);
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceReady, setVoiceReady] = useState(false);
+  const [voiceSaving, setVoiceSaving] = useState(false);
+  const [voicePersisted, setVoicePersisted] = useState(false);
+  const [voiceUploadPercent, setVoiceUploadPercent] = useState(0);
   const [voiceError, setVoiceError] = useState('');
   const kit = useRef<DrumKitHandle>(null);
   const audio = useRef<DrumAudio | null>(null);
@@ -45,15 +57,49 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
   const loopRef = useRef(loop);
   const volumeRef = useRef(muted);
   const audioPromise = useRef<Promise<DrumAudio> | null>(null);
+  const voiceChange = useRef(0);
+  const voiceRequest = useRef<AbortController | null>(null);
   useEffect(() => { loopRef.current = loop; }, [loop]);
   useEffect(() => { volumeRef.current = muted; audio.current?.mute(muted); }, [muted]);
-  useEffect(() => () => { if (pulseTimer.current) clearTimeout(pulseTimer.current); }, []);
+  useEffect(() => () => {
+    if (pulseTimer.current) clearTimeout(pulseTimer.current);
+    voiceRequest.current?.abort();
+    audio.current?.stop();
+    void audio.current?.loadVoice(null);
+  }, []);
   useEffect(() => {
     if (!voiceFile) { setVoiceUrl(null); return; }
     const url = URL.createObjectURL(voiceFile);
     setVoiceUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [voiceFile]);
+
+  useEffect(() => {
+    const version = ++voiceChange.current;
+    voiceRequest.current?.abort();
+    setVoiceFile(null);
+    setVoicePersisted(false);
+    setVoiceSaving(false);
+    setVoiceLoading(false);
+    setVoiceUploadPercent(0);
+    setVoiceError('');
+    if (!jobId || !voiceFilename) return;
+
+    const controller = new AbortController();
+    voiceRequest.current = controller;
+    setVoiceLoading(true);
+    void downloadVoiceStem(jobId, voiceFilename, controller.signal).then(file => {
+      if (version !== voiceChange.current) return;
+      setVoiceFile(file);
+      setVoicePersisted(true);
+    }).catch(error => {
+      if (version !== voiceChange.current || error instanceof Error && error.name === 'AbortError') return;
+      setVoiceError(error instanceof Error ? error.message : 'Could not restore the saved vocal stem.');
+    }).finally(() => {
+      if (version === voiceChange.current) setVoiceLoading(false);
+    });
+    return () => controller.abort();
+  }, [jobId, voiceFilename]);
 
   async function getEngine() {
     audioPromise.current ||= import('./audio').then(async ({ DrumAudio }) => {
@@ -122,7 +168,52 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
     setPlaying(false);
     setTime(0);
     position.current = 0;
+    const version = ++voiceChange.current;
+    voiceRequest.current?.abort();
     setVoiceFile(file);
+    setVoicePersisted(false);
+    setVoiceUploadPercent(0);
+    if (!jobId) {
+      setVoiceSaving(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    voiceRequest.current = controller;
+    setVoiceSaving(true);
+    void uploadVoiceStem(jobId, file, value => {
+      if (version === voiceChange.current) setVoiceUploadPercent(value);
+    }, controller.signal).then(result => {
+      if (version !== voiceChange.current) return;
+      setVoicePersisted(true);
+      onVoiceFilenameChange(result.voice_filename);
+    }).catch(error => {
+      if (version !== voiceChange.current || error instanceof Error && error.name === 'AbortError') return;
+      setVoiceError(error instanceof Error
+        ? `This vocal is playing for now, but could not be saved to the server: ${error.message}`
+        : 'This vocal is playing for now, but could not be saved to the server.');
+    }).finally(() => {
+      if (version === voiceChange.current) setVoiceSaving(false);
+    });
+  }
+
+  async function removeVoice() {
+    const version = ++voiceChange.current;
+    voiceRequest.current?.abort();
+    setVoiceSaving(true);
+    setVoiceError('');
+    try {
+      if (jobId && voiceFilename) await deleteVoiceStem(jobId);
+      if (version !== voiceChange.current) return;
+      setVoiceFile(null);
+      setVoicePersisted(false);
+      onVoiceFilenameChange(null);
+    } catch (error) {
+      if (version !== voiceChange.current) return;
+      setVoiceError(error instanceof Error ? error.message : 'Could not remove the saved vocal stem. Try again.');
+    } finally {
+      if (version === voiceChange.current) setVoiceSaving(false);
+    }
   }
 
   useEffect(() => {
@@ -206,12 +297,12 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
     </div>
     <DrumPads active={active} onHit={strike} visible={visibleDrums} />
     <div className="voice-stem-panel" role="group" aria-label="Optional voice stem">
-      <div className="voice-stem-heading"><span className="voice-stem-icon"><FileAudio size={17} /></span><div><strong>Optional voice stem</strong><span>MP3 only · plays in sync · stays on this device</span></div></div>
+      <div className="voice-stem-heading"><span className="voice-stem-icon"><FileAudio size={17} /></span><div><strong>Optional voice stem</strong><span>MP3 only · synced playback · {jobId ? 'saved with this recording' : 'session playback only'}</span></div></div>
       <div className="voice-stem-controls">
-        {voiceFile ? <div className="voice-stem-file"><div><strong title={voiceFile.name}>{voiceFile.name}</strong><span>{voiceLoading ? 'Loading voice stem...' : voiceReady ? `${formatTime(voiceDuration || 0)} · READY TO PLAY` : 'Preparing audio'}</span></div><button className="icon-button" title="Remove voice stem" aria-label="Remove voice stem" onClick={() => setVoiceFile(null)}><X size={15} /></button></div> : <span className="voice-stem-empty">Add a vocal MP3 if you want to hear it with the drum track.</span>}
+        {voiceFile ? <div className="voice-stem-file"><div><strong title={voiceFile.name}>{voiceFile.name}</strong><span>{voiceSaving ? `UPLOADING TO SERVER · ${voiceUploadPercent}%` : voiceLoading ? 'LOADING VOCAL STEM' : voiceReady ? `${formatTime(voiceDuration || 0)} · ${voicePersisted ? 'SAVED WITH RECORDING' : jobId ? 'NOT SAVED' : 'SESSION ONLY'}` : 'PREPARING AUDIO'}</span></div><button className="icon-button" title="Remove voice stem" aria-label="Remove voice stem" onClick={() => void removeVoice()} disabled={voiceSaving}><X size={15} /></button></div> : <span className="voice-stem-empty">{jobId ? 'Add a vocal MP3 to store it with this recording.' : 'Open a recording to save a vocal MP3 on the server.'}</span>}
         <label className="voice-stem-upload"><input ref={voiceInput} type="file" accept=".mp3,audio/mpeg" aria-label="Choose voice stem MP3" className="sr-only" onChange={event => { chooseVoice(event.target.files?.[0]); event.target.value = ''; }} /><Upload size={15} />{voiceFile ? 'Replace MP3' : 'Choose MP3'}</label>
       </div>
-      {voiceLoading && <div className="voice-stem-progress" role="status" aria-label="Loading voice stem"><span /></div>}
+      {(voiceLoading || voiceSaving) && <div className="voice-stem-progress" role="status" aria-label={voiceSaving ? 'Uploading voice stem' : 'Loading voice stem'}><span style={voiceSaving ? { width: `${voiceUploadPercent}%`, animation: 'none' } : undefined} /></div>}
       {voiceError && <p className="voice-stem-error" role="alert">{voiceError}</p>}
     </div>
     <div className="transport">

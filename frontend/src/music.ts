@@ -3,14 +3,14 @@ export interface Hit { time: number; duration: number; midi: number; velocity: n
 export interface Sequence { hits: Hit[]; duration: number; bpm: number }
 
 export const drums: { id: Drum; name: string; color: string; note: number }[] = [
-  { id: 'kick', name: 'Kick', color: '#d5ed83', note: 36 },
-  { id: 'snare', name: 'Snare', color: '#f0a887', note: 38 },
-  { id: 'hihat', name: 'Hi-hat', color: '#d7bd77', note: 42 },
-  { id: 'tom1', name: 'High tom', color: '#a6c5dc', note: 48 },
-  { id: 'tom2', name: 'Mid tom', color: '#85bfae', note: 45 },
-  { id: 'floor', name: 'Floor tom', color: '#7fa7cd', note: 41 },
-  { id: 'crash', name: 'Crash', color: '#ddc48a', note: 49 },
-  { id: 'ride', name: 'Ride', color: '#c4aa7a', note: 51 },
+  { id: 'kick', name: 'Kick', color: '#74d7ff', note: 36 },
+  { id: 'snare', name: 'Snare', color: '#ef9abb', note: 38 },
+  { id: 'hihat', name: 'Hi-hat', color: '#b5e7ff', note: 42 },
+  { id: 'tom1', name: 'High tom', color: '#a4c7ff', note: 48 },
+  { id: 'tom2', name: 'Mid tom', color: '#68e2d7', note: 45 },
+  { id: 'floor', name: 'Floor tom', color: '#669df0', note: 41 },
+  { id: 'crash', name: 'Crash', color: '#d9e8ff', note: 49 },
+  { id: 'ride', name: 'Ride', color: '#92cdfc', note: 51 },
 ];
 
 export function drumForNote(note: number): Drum | null {

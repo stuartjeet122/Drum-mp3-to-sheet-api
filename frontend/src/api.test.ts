@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { exportUrl, formatTime, isActive, request, uploadedJob, validateAudio, type Job } from './api';
+import { deleteVoiceStem, downloadVoiceStem, exportUrl, formatTime, isActive, request, uploadedJob, uploadVoiceStem, validateAudio, voiceStemUrl, type Job } from './api';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -25,6 +25,7 @@ it('only polls active jobs', () => {
 
 it('uses the deployed export contract', () => {
   expect(exportUrl('abc', 'musicxml')).toBe('/drum-sheet-api/api/transcriptions/abc/export/musicxml');
+  expect(voiceStemUrl('abc')).toBe('/drum-sheet-api/api/transcriptions/abc/voice');
 });
 
 it('surfaces server errors instead of treating them as successful jobs', async () => {
@@ -41,5 +42,58 @@ it('normalizes the smaller upload response without inventing ready exports', () 
   const result = uploadedJob({ job_id: 'id', status: 'UPLOADED', original_filename: 'take.mp3', created_at: '2026-11-16' });
   expect(result.available_exports).toEqual({ midi: false, musicxml: false, pdf: false });
   expect(result.progress_percent).toBe(0);
+  expect(result.voice_filename).toBeNull();
   expect(isActive(result)).toBe(false);
+});
+
+it('downloads a saved vocal and removes it through the job-scoped API', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(new Blob(['ID3 vocal']), { status: 200, headers: { 'Content-Type': 'audio/mpeg' } }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const file = await downloadVoiceStem('job-id', 'voice.mp3', new AbortController().signal);
+  expect(file.name).toBe('voice.mp3');
+  expect(file.type).toBe('audio/mpeg');
+  await expect(deleteVoiceStem('job-id')).resolves.toBeUndefined();
+  expect(fetchMock.mock.calls.map(([url, options]) => [url, options?.method])).toEqual([
+    ['/drum-sheet-api/api/transcriptions/job-id/voice', undefined],
+    ['/drum-sheet-api/api/transcriptions/job-id/voice', 'DELETE'],
+  ]);
+});
+
+it('surfaces errors from vocal downloads and deletions', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Vocal not found' }), { status: 404 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Storage unavailable' }), { status: 500 })));
+  await expect(downloadVoiceStem('job-id', 'voice.mp3', new AbortController().signal)).rejects.toThrow('Vocal not found');
+  await expect(deleteVoiceStem('job-id')).rejects.toThrow('Storage unavailable');
+});
+
+it('uploads a vocal stem with progress and surfaces server errors', async () => {
+  class MockXHR {
+    upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
+    responseType = '';
+    timeout = 0;
+    status = 200;
+    response: unknown = { job_id: 'job-id', voice_filename: 'voice.mp3', file_size_bytes: 12 };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    ontimeout: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    onloadend: (() => void) | null = null;
+    open = vi.fn();
+    send = vi.fn(() => this.onload?.());
+    abort = vi.fn(() => this.onabort?.());
+  }
+  const xhr = new MockXHR();
+  vi.stubGlobal('XMLHttpRequest', vi.fn(() => xhr));
+  const progress = vi.fn();
+  await expect(uploadVoiceStem('job-id', new File(['ID3 audio'], 'voice.mp3'), progress, new AbortController().signal))
+    .resolves.toEqual({ job_id: 'job-id', voice_filename: 'voice.mp3', file_size_bytes: 12 });
+  expect(xhr.open).toHaveBeenCalledWith('POST', '/drum-sheet-api/api/transcriptions/job-id/voice');
+
+  xhr.status = 415;
+  xhr.response = { detail: 'Voice stems must be MP3 files.' };
+  await expect(uploadVoiceStem('job-id', new File(['audio'], 'voice.wav'), progress, new AbortController().signal))
+    .rejects.toThrow('Voice stems must be MP3 files.');
 });

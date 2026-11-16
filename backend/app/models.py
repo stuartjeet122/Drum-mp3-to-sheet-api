@@ -63,6 +63,8 @@ class TranscriptionJob(BaseModel):
     progress_percent: int = Field(default=0, ge=0, le=100)
     original_filename: str
     stored_audio_path: Path
+    stored_voice_path: Path | None = None
+    voice_filename: str | None = None
     upload_directory: str = "uploads"
     output_directory: str = "exports"
     file_size_bytes: int = Field(default=0, ge=0)
