@@ -1,10 +1,108 @@
 # M73 Production Deployment
 
-Ubuntu Server 24.04 LTS, x86_64, 8 GB RAM, no GPU. Deployment uses native systemd.
-Installation requires running systemd and cgroup-v2 memory
+Linux x86_64, 8 GB RAM, no GPU. Choose Docker Compose or native Ubuntu systemd;
+do not run both workers against the same jobs. Native installation targets
+Ubuntu Server 24.04 LTS and requires running systemd and cgroup-v2 memory
 support; the installer refuses to proceed without them. Run only one worker per
 deployment: concurrency is not a distributed lock. Python 3.11-3.13 is supported by
 these deployment pins; Python 3.14 needs a separate compatibility check.
+
+## Docker Compose
+
+Install Docker Engine and the Compose v2 plugin on a Linux x86_64 host using
+Docker's official installation instructions. The image includes Python, an
+isolated `/opt/venv`, CPU inference dependencies, FFmpeg and headless MuseScore;
+the host needs no Python packages, Redis installation or frontend. The Compose
+stack runs its own private Redis, independent of host Redis and its databases.
+Docker daemon access is effectively root access; grant it only to trusted users.
+
+1. Clone this repository on the server and change to its root. Stop any previous
+	deployment of this same application before migrating; old job data is not
+	imported into the new volumes automatically. Keep other hosted apps running.
+2. Obtain reviewed, compatible checkpoints and place them at:
+	`models/adtof/adtof_frame_rnn_pytorch_weights.pth` and `models/oaf/model.onnx`.
+	Models stay outside the image and are mounted read-only. On standard Linux
+	Docker without user-namespace remapping, allow the container group to read
+	them (adjust ownership mapping for rootless/user-namespace installations):
+
+	```sh
+	sudo chown -R root:10001 models
+	sudo find models -type d -exec chmod 0750 {} +
+	sudo find models -type f -exec chmod 0640 {} +
+	```
+
+3. Validate, build and start. Downloads need Internet access and sufficient disk
+	space; only trusted source is built. No secrets or model weights enter the
+	restricted build context. The first dependency build can take several minutes.
+
+	```sh
+	docker compose config --quiet
+	docker compose up -d --build
+	docker compose ps
+	docker compose logs --tail=100 api worker
+	curl --fail http://127.0.0.1:8000/api/health
+	docker compose exec worker python -c 'import torch, torchaudio; assert torch.version.cuda is None; print(torch.__version__, torchaudio.__version__)'
+	docker compose exec api python scripts/smoke_test.py --base-url http://127.0.0.1:8000
+	```
+
+	API health verifies storage/Redis and artifact presence, not working inference
+	or a live worker. Missing models can leave HTTP health degraded but successful;
+	the full smoke test must pass before calling the deployment functional.
+4. On the host, open `http://127.0.0.1:8000/docs`. From Windows, tunnel with
+	`ssh -N -L 8000:127.0.0.1:8000 sjeetoo@stuserver`, keep that terminal open,
+	then open `http://localhost:8000/docs`. Redis has no published port. The API
+	has no authentication; keep it private or use an authenticated TLS proxy.
+	Docker deployment does not register itself with Cockpit App Manager's native
+	Python adapter. A host proxy can forward to the loopback API independently.
+
+Optional Compose settings can be set in the shell or a Compose `.env` file:
+`API_PORT=8100` changes the host loopback port if 8000 is occupied;
+`API_ROOT_PATH=/drums` supports a prefix-stripping proxy, and
+`CORS_ORIGINS=["https://your-frontend.example"]` allows an explicit browser origin.
+Defaults are port 8000, no prefix, and `[]` for API-only testing. Compose sets
+the internal Redis URL and storage/model paths directly; do not use the host's
+`redis://127.0.0.1:6379/1` inside containers. No PostgreSQL database is needed.
+Configure a proxy upload limit above 100 MiB if you put one in front of the API.
+
+### Data, Updates and Image Export
+
+The named volumes `app-storage` and `redis-data` survive ordinary stop/recreate
+and `docker compose down`. Never use `down -v`, delete these volumes, or change
+the Compose project name unless you intend to use different persistent data.
+The model bind mount must exist and be readable; existing named volumes retain
+their ownership rather than being repaired by a privileged application process.
+
+For backups, stop API and worker, then Redis. Archive both named volumes and
+the host model tree using Docker's volume-backup procedure. Store backups away
+from this server and test restoring them. Do not back up a running Redis AOF
+directory by blindly copying files. Restart the stack after the backup.
+
+For upgrades, back up first, stop the worker gracefully, stop the API, update
+the checkout, and run `docker compose up -d --build`. Named data is retained;
+code rollback does not roll back persistent state. Worker shutdown may wait up
+to one hour for an active task. A hard kill can redeliver a task; do not scale
+workers or run native workers against this queue.
+
+To move an already-built package to another x86_64 Linux Docker host:
+
+```sh
+docker image save -o drum-transcription-image.tar drum-transcription:local redis:7-alpine
+```
+
+Transfer the archive, `docker-compose.yml` and the model tree separately to the
+target host. Load with `docker image load -i drum-transcription-image.tar`, then
+run `docker compose up -d --no-build --pull never` from that directory. The
+archive contains image dependencies, not existing named-volume data, models or
+host configuration. Both images must already be present before exporting.
+
+API/worker run as UID/GID 10001 with a read-only root filesystem, dropped
+capabilities and writable temporary caches. The worker has a 6-GiB memory cap,
+no extra swap, and two CPU cores' quota; API has a 1-GiB cap and Redis 256 MiB.
+These are not a guarantee an 8-GB host cannot stall. Leave headroom for the OS
+and other applications; lower caps only after testing representative recordings.
+Verify actual limits with Docker inspect and use a host with enforced cgroups.
+Do not treat health checks as automatic restarts or OOM recovery: monitor logs
+and quarantine repeatedly failing tasks rather than repeatedly purging queues.
 
 ## Native Ubuntu
 
@@ -231,13 +329,15 @@ Top-level dependency releases are exact pins; transitive dependencies, apt
 packages, and base image tags are not a full hash/digest lock. Keep security
 reviews and target-host smoke runs in the upgrade process. Torch is forced to
 `2.15.0+cpu`, and torchaudio `2.11.1+cpu` advertises `torch>=2.11` compatibility;
-both imports and CPU-only assertions are installer gates. Their real Linux
+both imports and CPU-only assertions are installer/image-build gates. Their real Linux
 wheels and the model adapters must still be exercised on the target machine.
 
-Development checks cover Bash syntax, systemd service contracts, deterministic
+Development checks cover Bash syntax, systemd/Docker configuration contracts, deterministic
 audio and the real quality gate, mocked HTTP smoke success/failure/deadline paths,
 and the existing application suite. They do not prove apt availability on every
-Ubuntu version, systemd cgroup OOM behavior, actual inference or
-MuseScore output. The Windows development environment's TLS trust rejects the
+Ubuntu version, Docker image builds, cgroup OOM behavior, actual inference or
+MuseScore output. Docker is unavailable in this Windows workspace, so an image
+build and full smoke test on the target Linux host remain required. This
+development environment's TLS trust rejects the
 PyTorch CPU index; TLS validation was not disabled.
 Linux installation is therefore a required deployment gate, not a verified result.

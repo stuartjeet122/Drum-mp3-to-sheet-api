@@ -7,10 +7,31 @@ fusion, rhythm quantization, and notation exports without backend framework depe
 The engine pipeline and Celery tasks connect these stages with persisted progress.
 
 For the resource-capped M73 production installation, use
-[the deployment runbook](deploy/README.md): native Ubuntu systemd deployment
-with a real end-to-end smoke client.
+[the deployment runbook](deploy/README.md): Docker Compose or native Ubuntu
+systemd deployment with a real end-to-end smoke client.
 `requirements.txt` pins CPU-only production dependencies; `pyproject.toml`
 retains version ranges for development.
+
+## Docker Quick Start
+
+Install Docker Engine and Compose v2 on a Linux x86_64 host. Place compatible,
+trusted model checkpoints at `models/adtof/adtof_frame_rnn_pytorch_weights.pth`
+and `models/oaf/model.onnx`, readable by container UID 10001, then run:
+
+```sh
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+curl --fail http://127.0.0.1:8000/api/health
+```
+
+Open http://127.0.0.1:8000/docs on the Docker host. From another computer use an
+SSH tunnel, not a publicly exposed port. No frontend or `.env` is required;
+Compose provides private Redis automatically and disables cross-origin access.
+Uploads/jobs/exports and Redis data use persistent named volumes. Do not run
+`docker compose down -v` on data you want to keep. Model weights are not bundled.
+See [Docker deployment](deploy/README.md#docker-compose) for model permissions,
+real inference validation, backups, upgrades and exporting a portable image.
 
 ## Exact Source Tree
 
@@ -20,6 +41,9 @@ Generated environments, caches, and installed package metadata are excluded.
 .
 |-- .env.example
 |-- .gitignore
+|-- .dockerignore
+|-- Dockerfile
+|-- docker-compose.yml
 |-- requirements.txt
 |-- pyproject.toml
 |-- README.md

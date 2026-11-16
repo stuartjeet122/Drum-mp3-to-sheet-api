@@ -1,0 +1,94 @@
+name: drum-transcription
+
+x-application: &application
+  image: drum-transcription:local
+  platform: linux/amd64
+  build: .
+  restart: unless-stopped
+  init: true
+  user: "10001:10001"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  volumes:
+    - app-storage:/app/storage
+    - type: bind
+      source: ./models
+      target: /app/models
+      read_only: true
+      bind:
+        create_host_path: false
+  environment:
+    REDIS_URL: redis://redis:6379/0
+    CORS_ORIGINS: '${CORS_ORIGINS:-[]}'
+    APP_STORAGE_DIR: /app/storage
+    APP_MODELS_DIR: /app/models
+  tmpfs:
+    - /tmp:size=268435456,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction", "--save", ""]
+    volumes:
+      - redis-data:/data
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  api:
+    <<: *application
+    command: ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--root-path", "${API_ROOT_PATH:-}"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1
+    pids_limit: 128
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=10).read()"]
+      interval: 30s
+      timeout: 12s
+      start_period: 60s
+      retries: 3
+  worker:
+    <<: *application
+    command: ["python", "-m", "celery", "-A", "backend.app.workers.celery_app:celery_app", "worker", "--pool=prefork", "--concurrency=1", "--loglevel=info", "-Q", "celery"]
+    mem_limit: 6g
+    memswap_limit: 6g
+    mem_reservation: 5g
+    cpus: 2
+    pids_limit: 256
+    oom_score_adj: 500
+    stop_grace_period: 3600s
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+volumes:
+  app-storage:
+  redis-data:

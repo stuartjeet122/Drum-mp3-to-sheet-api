@@ -8,6 +8,7 @@ import httpx
 import numpy as np
 import pytest
 import soundfile as sf
+import yaml
 
 from scripts import smoke_test as smoke
 
@@ -73,6 +74,60 @@ def test_native_services_use_the_project_virtual_environment() -> None:
     assert unit("drum-worker.service")["Service"]["ExecStart"].startswith(
         "/opt/drum-transcription/.venv/bin/celery "
     )
+
+
+def test_docker_image_uses_isolated_cpu_runtime_and_minimal_context() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    ignored = (ROOT / ".dockerignore").read_text().splitlines()
+    assert "python:3.11-slim-bookworm AS builder" in dockerfile
+    assert 'python -m venv "$VIRTUAL_ENV"' in dockerfile
+    assert "COPY --from=builder /opt/venv /opt/venv" in dockerfile
+    assert "torch.version.cuda is None" in dockerfile
+    assert "USER 10001:10001" in dockerfile
+    assert "ffmpeg libsndfile1 musescore3 fontconfig fonts-freefont-ttf" in dockerfile
+    assert "COPY scripts ./scripts" in dockerfile
+    assert ignored[0] == "*" and "**/.env*" in ignored
+    assert not any(line.startswith(("!storage", "!models", "!.env", "!.git/")) for line in ignored)
+
+
+def test_compose_keeps_data_private_persistent_and_resource_capped() -> None:
+    compose = (ROOT / "docker-compose.yml").read_text()
+    assert "platform: linux/amd64" in compose
+    assert "app-storage:/app/storage" in compose and "redis-data:/data" in compose
+    assert "source: ./models" in compose and "create_host_path: false" in compose
+    assert 'user: "10001:10001"' in compose and "read_only: true" in compose
+    assert "REDIS_URL: redis://redis:6379/0" in compose
+    assert "CORS_ORIGINS: '${CORS_ORIGINS:-[]}'" in compose
+    assert '"127.0.0.1:${API_PORT:-8000}:8000"' in compose
+    assert "6379:6379" not in compose
+    assert "mem_limit: 6g" in compose and "memswap_limit: 6g" in compose
+    assert "oom_score_adj: 500" in compose and "stop_grace_period: 3600s" in compose
+    assert '"--pool=prefork", "--concurrency=1"' in compose
+    assert "condition: service_healthy" in compose
+    assert "no-new-privileges:true" in compose and "cap_drop:" in compose
+
+
+def test_compose_parsed_service_wiring() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    services = compose["services"]
+    assert set(services) == {"api", "worker", "redis"}
+    assert set(compose["volumes"]) == {"app-storage", "redis-data"}
+    api, worker, redis = services["api"], services["worker"], services["redis"]
+    assert "ports" not in redis and "ports" not in worker
+    assert api["ports"] == ["127.0.0.1:${API_PORT:-8000}:8000"]
+    assert worker["depends_on"]["api"]["condition"] == "service_healthy"
+    assert worker["depends_on"]["redis"]["condition"] == "service_healthy"
+    for service in (api, worker):
+        assert service["image"] == "drum-transcription:local"
+        assert service["environment"]["REDIS_URL"] == "redis://redis:6379/0"
+        assert service["environment"]["APP_STORAGE_DIR"] == "/app/storage"
+        assert service["environment"]["APP_MODELS_DIR"] == "/app/models"
+        assert service["read_only"] is True
+        assert service["cap_drop"] == ["ALL"]
+        assert service["volumes"][0] == "app-storage:/app/storage"
+        models = service["volumes"][1]
+        assert models["type"] == "bind" and models["read_only"] is True
+        assert models["bind"]["create_host_path"] is False
 
 
 def test_synthesized_loop_is_deterministic_unclipped_and_four_bars() -> None:

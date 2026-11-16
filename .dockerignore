@@ -1,0 +1,15 @@
+*
+!Dockerfile
+!.dockerignore
+!requirements.txt
+!pyproject.toml
+!README.md
+!backend/
+!backend/**
+!engine/
+!engine/**
+!scripts/
+!scripts/**
+**/__pycache__/
+**/*.pyc
+**/.env*
