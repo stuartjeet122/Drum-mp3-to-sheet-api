@@ -20,6 +20,7 @@ function midiFile() {
     if (index % 2 === 0) track.addNote({ midi: index % 4 === 0 ? 36 : 38, time: index * 0.326, duration: 0.1, velocity: 0.8 });
   }
   track.addNote({ midi: 38, time: 0.652, duration: 0.08, velocity: 0.5 });
+  track.addNote({ midi: 46, time: 0.652, duration: 0.4, velocity: 0.65 });
   return Buffer.from(midi.toArray());
 }
 

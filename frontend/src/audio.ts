@@ -1,76 +1,94 @@
 import * as Tone from 'tone';
 import { drumForNote, type Hit } from './music';
 
+const variations = (name: string) => Array.from(
+  { length: 3 },
+  (_, index) => `${name}-${String(index + 1).padStart(3, '0')}-Natural.mp3`,
+);
+
+const sampleGroups = {
+  kickSoft: variations('KickA-Soft'),
+  kickMedium: variations('KickA-Med'),
+  kickHard: variations('KickA-Hard'),
+  snareSoft: variations('SnareA-Soft'),
+  snareMedium: variations('SnareA-Med'),
+  snareHard: variations('SnareA-Hard'),
+  sideStick: variations('Side-Stick'),
+  hatClosed: variations('Hat-Closed'),
+  hatPedal: variations('Hat-Pedal'),
+  hatOpen: variations('Hat-OpenMed'),
+  tom1: variations('Tom1'),
+  tom2: variations('Tom2'),
+  tom3: variations('Tom3'),
+  crash: variations('CrashA'),
+  ride: variations('Ride'),
+  rideBell: variations('RideBell'),
+};
+
+const sampleUrls: Record<string, string> = {};
+for (const files of Object.values(sampleGroups)) {
+  for (const file of files) {
+    sampleUrls[file] = `${import.meta.env.BASE_URL}samples/drums/${file}`;
+  }
+}
+
+type SampleGroup = keyof typeof sampleGroups;
+
 export class DrumAudio {
   private lastHits = new Map<string, number>();
+  private roundRobin = new Map<SampleGroup, number>();
+  private openHat: Tone.Player | null = null;
   private output = new Tone.Volume(-6).toDestination();
   private limiter = new Tone.Limiter(-1.5).connect(this.output);
-  private kick = new Tone.MembraneSynth({
-    pitchDecay: 0.055, octaves: 8,
-    envelope: { attack: 0.001, decay: 0.38, sustain: 0, release: 0.08 },
-  }).connect(this.limiter);
-  private kickBeater = new Tone.NoiseSynth({
-    noise: { type: 'pink' },
-    envelope: { attack: 0.001, decay: 0.022, sustain: 0, release: 0.012 },
-  }).connect(new Tone.Filter(1800, 'lowpass').connect(this.limiter));
-  private snareBody = new Tone.MembraneSynth({
-    pitchDecay: 0.012, octaves: 2,
-    envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.035 },
-  }).connect(this.limiter);
-  private snareWire = new Tone.NoiseSynth({
-    noise: { type: 'white' },
-    envelope: { attack: 0.001, decay: 0.19, sustain: 0, release: 0.045 },
-  }).connect(new Tone.Filter(2100, 'bandpass').connect(this.limiter));
-  private hats = new Tone.NoiseSynth({
-    noise: { type: 'white' },
-    envelope: { attack: 0.001, decay: 0.045, sustain: 0, release: 0.025 },
-  }).connect(new Tone.Filter(7200, 'highpass').connect(this.limiter));
-  private toms = new Tone.PolySynth(Tone.MembraneSynth, {
-    pitchDecay: 0.035, octaves: 3,
-    envelope: { attack: 0.001, decay: 0.28, sustain: 0, release: 0.08 },
-  }).connect(this.limiter);
-  private cymbals = new Tone.PolySynth(Tone.MetalSynth, {
-    envelope: { attack: 0.001, decay: 0.85, release: 0.5 },
-    harmonicity: 5.1, modulationIndex: 32, resonance: 4200, octaves: 1.5, volume: -18,
-  }).connect(this.limiter);
+  private players = new Tone.Players(sampleUrls, { fadeOut: 0.035 }).connect(this.limiter);
 
-  async unlock() { await Tone.start(); }
+  async unlock() {
+    await Tone.start();
+    await Tone.loaded();
+  }
+
   now() { return Tone.now(); }
   mute(value: boolean) { this.output.mute = value; }
+
+  private play(group: SampleGroup, time: number): Tone.Player {
+    const files = sampleGroups[group];
+    const index = this.roundRobin.get(group) || 0;
+    this.roundRobin.set(group, index + 1);
+    const player = this.players.player(files[index % files.length]);
+    player.start(time);
+    return player;
+  }
+
   hit(hit: Hit, time = Tone.now()) {
     const velocity = Math.max(0.05, Math.min(1, hit.velocity));
-    const accent = Math.pow(velocity, 1.25);
+    const level = velocity < 0.4 ? 'Soft' : velocity < 0.76 ? 'Medium' : 'Hard';
     const drum = drumForNote(hit.midi);
     time = Math.max(time, (this.lastHits.get(drum) ?? -Infinity) + 0.001);
     this.lastHits.set(drum, time);
+
     switch (drum) {
-      case 'kick':
-        this.kick.triggerAttackRelease('C1', '8n', time, accent);
-        this.kickBeater.triggerAttackRelease('32n', time, accent * 0.48);
-        break;
+      case 'kick': this.play(`kick${level}`, time); break;
       case 'snare':
-        this.snareBody.triggerAttackRelease('G2', '16n', time, accent * 0.5);
-        this.snareWire.triggerAttackRelease('16n', time, accent * 0.86);
+        this.play(hit.midi === 37 ? 'sideStick' : `snare${level}`, time);
         break;
-      case 'hihat': {
-        const open = hit.midi === 46;
-        this.hats.triggerAttackRelease(open ? '8n' : '32n', time, accent * (open ? 0.48 : 0.38));
+      case 'hihat':
+        if (hit.midi === 46) this.openHat = this.play('hatOpen', time);
+        else {
+          this.openHat?.stop(time);
+          this.openHat = null;
+          this.play(hit.midi === 44 ? 'hatPedal' : 'hatClosed', time);
+        }
         break;
-      }
-      case 'tom1': this.toms.triggerAttackRelease('D3', '16n', time, accent); break;
-      case 'tom2': this.toms.triggerAttackRelease('A2', '16n', time, accent); break;
-      case 'floor': this.toms.triggerAttackRelease('E2', '16n', time, accent); break;
-      case 'crash': this.cymbals.triggerAttackRelease('C3', '8n', time, accent * 0.62); break;
-      case 'ride': this.cymbals.triggerAttackRelease('G4', '32n', time, accent * 0.4); break;
+      case 'tom1': this.play('tom1', time); break;
+      case 'tom2': this.play('tom2', time); break;
+      case 'floor': this.play('tom3', time); break;
+      case 'crash': this.play('crash', time); break;
+      case 'ride': this.play(hit.midi === 53 ? 'rideBell' : 'ride', time); break;
     }
   }
+
   stop() {
-    this.kick.triggerRelease();
-    this.kickBeater.triggerRelease();
-    this.snareBody.triggerRelease();
-    this.snareWire.triggerRelease();
-    this.hats.triggerRelease();
-    this.toms.releaseAll();
-    this.cymbals.releaseAll();
+    this.players.stopAll();
+    this.openHat = null;
   }
 }

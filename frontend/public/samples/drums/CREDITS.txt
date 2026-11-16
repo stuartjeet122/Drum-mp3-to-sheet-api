@@ -1,0 +1,6 @@
+Drum samples: DrumThrash free drum sample pack, DT-Natural set.
+The source archive's ReadMe states: "Samples are royalty free. Use them any way you like."
+Source: https://www.drumthrash.com/
+
+This app includes a small MP3-converted subset of the original WAV samples:
+three round-robin hits for each included drum and velocity layer.

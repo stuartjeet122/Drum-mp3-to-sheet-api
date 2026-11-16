@@ -58,7 +58,7 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
       const note = drums.find(item => item.id === drum)!.note;
       engine.hit({ time: 0, duration: 0.1, midi: note, velocity: 0.8 });
       pulse(drum);
-    } catch { setError('Audio could not start. Check your browser audio permissions.'); }
+    } catch { setError('Drum samples could not load or audio could not start. Check your connection and browser audio permissions.'); }
   }
 
   useEffect(() => {
@@ -112,7 +112,7 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
     if (playing) { setPlaying(false); return; }
     setUnlocking(true); setError('');
     try { await getAudio(); setPlaying(true); }
-    catch { setError('Audio could not start. Check your browser audio permissions.'); }
+    catch { setError('Drum samples could not load or audio could not start. Check your connection and browser audio permissions.'); }
     finally { setUnlocking(false); }
   }
 

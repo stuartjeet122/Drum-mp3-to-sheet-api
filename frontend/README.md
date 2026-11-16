@@ -41,15 +41,17 @@ deployment is recommended, especially behind an authenticated reverse proxy.
 - Completed PDF scores render locally with page navigation and zoom. Current
   PDF, MIDI and MusicXML downloads are only enabled when the API reports them.
   A missing optional PDF does not hide the other formats.
-- The exported MIDI drives layered, acoustic-style synthesized drum voices and
-  a top-down kit illustration with per-hit impact ripples. Play/pause, restart,
+- The exported MIDI drives a sample-based acoustic kit and a top-down
+  illustration with per-hit impact ripples. Kick and snare use soft, medium,
+  and hard layers; other drums use round-robin variations. Play/pause, restart,
   seek, loop, mute and speed controls are local;
   they do not submit processing jobs. The built-in groove is explicitly a demo.
 
 The current API expects an **isolated drum stem**. This frontend does not add
 source separation for mixed songs. The top-down kit is a simplified eight-piece
 GM percussion visualization, not a promise of instrument-detection accuracy.
-Playback uses layered synthesis rather than recordings or a sample pack.
+Playback uses a compact subset of DrumThrash's DT-Natural free drum recordings;
+see `public/samples/drums/CREDITS.txt` for the source and included usage note.
 
 ## Deploy Beside the Existing API
 
