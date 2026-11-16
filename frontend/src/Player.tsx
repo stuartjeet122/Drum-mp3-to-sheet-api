@@ -31,6 +31,7 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
   const audioPromise = useRef<Promise<DrumAudio> | null>(null);
   useEffect(() => { loopRef.current = loop; }, [loop]);
   useEffect(() => { volumeRef.current = muted; audio.current?.mute(muted); }, [muted]);
+  useEffect(() => () => { if (pulseTimer.current) clearTimeout(pulseTimer.current); }, []);
 
   async function getAudio() {
     audioPromise.current ||= import('./audio').then(async ({ DrumAudio }) => {
@@ -48,7 +49,7 @@ export default function Player({ sequence, title, loading }: { sequence: Sequenc
     kit.current?.hit(drum, velocity);
     setActive(drum);
     if (pulseTimer.current) clearTimeout(pulseTimer.current);
-    pulseTimer.current = setTimeout(() => setActive(null), 120);
+    pulseTimer.current = setTimeout(() => setActive(null), 220);
   }
 
   async function strike(drum: Drum) {

@@ -1,7 +1,7 @@
 # Backbeat Drum Studio
 
 A responsive dark-mode workspace for the existing drum transcription API.
-React/TypeScript, Vite, Three.js, Tone.js, @tonejs/midi and PDF.js. Fonts and
+React/TypeScript, Vite, Tone.js, @tonejs/midi and PDF.js. Fonts and
 the PDF worker are bundled locally; no CDN, analytics or third-party audio
 uploads are used. The existing Python API and Docker stack are unchanged.
 
@@ -29,6 +29,8 @@ deployment is recommended, especially behind an authenticated reverse proxy.
 
 ## Workflow
 
+- Upload and playback/score viewing are separate pages. The selected job is
+  retained in the URL fragment so its score can be opened or refreshed directly.
 - Pick or drop WAV, MP3, FLAC or AIFF audio up to 100 MiB, then create the score.
 - Upload progress comes from the actual network transfer. The app separately
   starts inference, then polls committed job status without overlapping polls.
@@ -39,15 +41,15 @@ deployment is recommended, especially behind an authenticated reverse proxy.
 - Completed PDF scores render locally with page navigation and zoom. Current
   PDF, MIDI and MusicXML downloads are only enabled when the API reports them.
   A missing optional PDF does not hide the other formats.
-- The exported MIDI drives a synthesized drum kit and per-instrument 3D hit
-  feedback. Play/pause, restart, seek, loop, mute and speed controls are local;
+- The exported MIDI drives layered, acoustic-style synthesized drum voices and
+  a top-down kit illustration with per-hit impact ripples. Play/pause, restart,
+  seek, loop, mute and speed controls are local;
   they do not submit processing jobs. The built-in groove is explicitly a demo.
 
 The current API expects an **isolated drum stem**. This frontend does not add
-source separation for mixed songs. The 3D kit is a simplified eight-piece GM
-percussion visualization, not a promise of instrument-detection accuracy.
-Playback is synthesized percussion, not the original recording or a sample pack.
-Modern WebGL is needed for 3D; the pads/player remain available without it.
+source separation for mixed songs. The top-down kit is a simplified eight-piece
+GM percussion visualization, not a promise of instrument-detection accuracy.
+Playback uses layered synthesis rather than recordings or a sample pack.
 
 ## Deploy Beside the Existing API
 
@@ -117,8 +119,8 @@ Browser tests use installed Google Chrome by default. For Edge set
 `npx playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`.
 Tests mock the management API and never submit real inference jobs. They cover
 upload/start/poll/completion, queue retries, MIDI parsing and playback controls,
-PDF rendering and mobile zoom, session restoration, export links, and nonblank
-3D canvas pixels at 320, 390, 768 and 1440 pixels. Screenshots are saved under
+PDF rendering and mobile zoom, session restoration, export links, and responsive
+top-down kit rendering at 320, 390, 768 and 1440 pixels. Screenshots are saved under
 the ignored `test-results/` directory.
 
 The live API is not reachable through DNS from the current development machine.

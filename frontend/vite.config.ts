@@ -17,7 +17,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          three: ['three'],
           audio: ['tone'],
           midi: ['@tonejs/midi'],
           pdf: ['pdfjs-dist/legacy/build/pdf.mjs'],

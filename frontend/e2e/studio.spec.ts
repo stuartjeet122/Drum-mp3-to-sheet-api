@@ -65,13 +65,16 @@ async function canvasColors(page: Page, selector: string) {
   }, image);
 }
 
-test('desktop studio renders a nonblank 3D kit and functional demo controls', async ({ page }, testInfo) => {
+test('desktop studio renders a top-down kit and functional demo controls', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await fixtures(page, []);
   await page.goto('./');
   await expect(page.getByRole('heading', { name: 'Your drum studio.' })).toBeVisible();
-  await expect(page.getByRole('img', { name: 'Interactive three-dimensional drum kit' })).toBeVisible();
-  await expect.poll(() => canvasColors(page, '.kit-canvas canvas')).toBeGreaterThan(45);
+  await expect(page.getByRole('button', { name: 'Add a recording' })).toBeVisible();
+  await page.getByRole('link', { name: 'Play & score' }).click();
+  await expect(page.getByRole('heading', { name: 'Play your score.' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Interactive top view of an acoustic drum kit' })).toBeVisible();
+  await expect.poll(() => canvasColors(page, '.top-kit-svg')).toBeGreaterThan(45);
   await page.screenshot({ path: testInfo.outputPath('desktop-studio.png'), fullPage: true });
   await page.getByRole('button', { name: 'Play drums', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause playback', exact: true })).toBeVisible();
@@ -105,6 +108,7 @@ test('upload starts once, polls real stages, and displays downloadable PDF/MIDI/
   await page.getByRole('button', { name: 'Create my score' }).click();
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '65');
   await expect(page.getByRole('heading', { name: 'Your groove, on paper.' })).toBeVisible();
+  await page.getByRole('link', { name: 'Play & view score' }).click();
   await expect(page.getByRole('link', { name: 'MusicXML', exact: true })).toHaveAttribute('href', /export\/musicxml$/);
   await expect(page.getByRole('link', { name: 'MIDI', exact: true })).toHaveAttribute('href', /export\/midi$/);
   await expect(page.getByRole('img', { name: 'Drum sheet music, page 1' })).toBeVisible();
@@ -140,6 +144,7 @@ test('invalid file is rejected before upload and missing PDF keeps other exports
   await page.getByLabel('Choose drum recording').setInputFiles({ name: 'bad.txt', mimeType: 'text/plain', buffer: Buffer.from('not audio') });
   await expect(page.getByRole('alert')).toContainText('Choose a WAV');
   await page.getByRole('button', { name: 'Open Sunday pocket.wav' }).click();
+  await page.getByRole('link', { name: 'Play & score' }).click();
   await expect(page.getByRole('heading', { name: 'The groove is ready.' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'MIDI', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'PDF', exact: true })).toBeDisabled();
@@ -148,8 +153,7 @@ test('invalid file is rejected before upload and missing PDF keeps other exports
 test('mobile completed score renders, zooms, and restores after reload', async ({ page }, testInfo) => {
   await fixtures(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('./');
-  await page.getByRole('button', { name: 'Open Sunday pocket.wav' }).click();
+  await page.goto(`./?page=play#job=${id}`);
   const score = page.getByRole('img', { name: 'Drum sheet music, page 1' });
   await expect(score).toBeVisible();
   await score.scrollIntoViewIfNeeded();
@@ -160,27 +164,23 @@ test('mobile completed score renders, zooms, and restores after reload', async (
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('mobile-completed.png'), fullPage: true });
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Your groove, on paper.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sunday pocket', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'MusicXML', exact: true })).toBeVisible();
 });
 
 for (const width of [320, 390, 768, 1440]) {
-  test(`layout and drum canvas fit a ${width}px viewport`, async ({ page }, testInfo) => {
+  test(`layout and top-down kit fit a ${width}px viewport`, async ({ page }, testInfo) => {
     await fixtures(page, []);
     await page.setViewportSize({ width, height: 900 });
     await page.goto('./');
     await expect(page.getByRole('button', { name: 'Add a recording' })).toBeVisible();
-    const scene = page.locator('.kit-canvas canvas'); await scene.scrollIntoViewIfNeeded();
-    await expect.poll(() => canvasColors(page, '.kit-canvas canvas')).toBeGreaterThan(40);
+    await page.getByRole('link', { name: 'Play & score' }).click();
+    const scene = page.locator('.top-kit-svg'); await scene.scrollIntoViewIfNeeded();
+    await expect.poll(() => canvasColors(page, '.top-kit-svg')).toBeGreaterThan(40);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.locator('button').evaluateAll(buttons => buttons.filter(button => button.clientWidth > 35 && button.scrollWidth > button.clientWidth + 2).map(button => button.textContent))).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath(`studio-${width}.png`), fullPage: true });
-    const before = await scene.screenshot();
-    const bounds = (await scene.boundingBox())!;
-    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(bounds.x + bounds.width / 2 + 55, bounds.y + bounds.height / 2 + 8, { steps: 6 });
-    await page.mouse.up();
-    await expect.poll(async () => !(await scene.screenshot()).equals(before)).toBe(true);
+    await page.getByRole('button', { name: 'Crash cymbal' }).click();
+    await expect(page.locator('.kit-instrument.is-hit')).toHaveCount(1);
   });
 }
