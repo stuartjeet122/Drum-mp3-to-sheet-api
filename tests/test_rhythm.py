@@ -149,6 +149,54 @@ def test_dense_fill_grids(slots: int, division: SubdivisionType) -> None:
     assert all(event.duration_quarters == pytest.approx(1 / slots) for event in transcription.events[:-1])
 
 
+@pytest.mark.parametrize("times", [
+    [0.125, 0.15], [0.125, 0.125], [0.005, 0.025], [1.975, 1.99],
+    [0.125, 0.13, 0.14], [0.125, 0.125, 0.125],
+])
+def test_close_same_drum_hits_keep_distinct_notation_positions(times: list[float]) -> None:
+    events = [hit(time, DrumInstrument.SNARE, 60 + index * 30) for index, time in enumerate(times)]
+    originals = [event.model_dump() for event in events]
+    result = quantize_events_to_grid(events, grid())
+    assert len(result.events) == len(events)
+    assert [event.time_sec for event in result.events] == times
+    assert [event.velocity for event in result.events] == [event.velocity for event in events]
+    assert [event.model_dump() for event in events] == originals
+    for left, right in zip(result.events, result.events[1:]):
+        assert left.quantized_time_sec < right.quantized_time_sec
+        assert left.quantized_time_sec + left.duration_quarters * 0.5 <= right.quantized_time_sec + 1e-9
+    for event in result.events:
+        assert event.micro_timing_ms == pytest.approx((event.time_sec - event.quantized_time_sec) * 1000)
+
+
+def test_close_snare_hits_do_not_displace_simultaneous_kick() -> None:
+    events = [hit(0.125, DrumInstrument.SNARE), hit(0.15, DrumInstrument.SNARE),
+              hit(0.125, DrumInstrument.KICK)]
+    result = quantize_events_to_grid(events, grid())
+    kick = next(event for event in result.events if event.instrument == DrumInstrument.KICK)
+    assert kick.quantized_time_sec == pytest.approx(0.125)
+    assert len(result.events) == 3
+
+
+def test_overfull_same_drum_measure_still_rejected() -> None:
+    events = [hit(index / 100, DrumInstrument.SNARE) for index in range(33)]
+    with pytest.raises(ValueError, match="without collision"):
+        quantize_events_to_grid(events, grid())
+
+
+def test_close_hits_export_to_musicxml(tmp_path: Path) -> None:
+    import xml.etree.ElementTree as ET
+
+    from engine.notation.musicxml import export_to_musicxml
+
+    events = [hit(time, DrumInstrument.SNARE) for time in (0.125, 0.15, 1.975, 1.99)]
+    result = quantize_events_to_grid(events, grid())
+    exported = export_to_musicxml(result, tmp_path / "close-hits.musicxml")
+    document = ET.parse(exported)
+    attacks = [note for note in document.findall("./part/measure/note[unpitched]")
+               if not any(tie.get("type") == "stop" for tie in note.findall("tie"))]
+    assert len(attacks) == len(events)
+
+
 def test_pickup_and_barline_durations() -> None:
     """A half-beat pickup occupies measure one; later downbeats start full bars."""
     beats = np.arange(-4, 10) * 0.5 + 0.25

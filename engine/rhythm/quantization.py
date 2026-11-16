@@ -17,8 +17,8 @@ def quantize_events_to_grid(events: list[FusedEvent], beat_grid: BeatGrid) -> Mu
 
     Beat markers are denominator-note beats. Interpolation honors every observed
     interval; reported durations are converted to quarter-note units. Durations
-    stop at same-instrument hits and barlines. Unrepresentable same-drum grid
-    collisions raise instead of silently dropping hits or overlapping notes.
+    stop at same-instrument hits and barlines. Colliding hits may use neighboring
+    slots, but unrepresentable patterns raise instead of silently dropping hits.
     """
     if not events:
         return MusicalTranscription(beat_grid=beat_grid, events=[], total_measures=0)
@@ -56,22 +56,53 @@ def quantize_events_to_grid(events: list[FusedEvent], beat_grid: BeatGrid) -> Mu
             candidates.append((8, SubdivisionType.THIRTY_SECOND, 1.15))
         best_score = float("inf")
         best: tuple[int, SubdivisionType, npt.NDArray[np.float64]] | None = None
-        for slots, subdivision, penalty in candidates:
-            quantized = np.rint(local * slots) / slots + bar * numerator
-            grid_coordinates = quantized + anchor
-            if np.any(grid_coordinates < 0) or np.any(grid_coordinates > len(beats) - 1):
-                continue
-            grid_times = np.interp(grid_coordinates, np.arange(len(beats)), beats)
-            if np.any(grid_times < -1e-9):
-                continue
-            pairs = {(ordered[index].instrument, round(float(position), 9))
-                     for index, position in zip(members, quantized, strict=True)}
-            if len(pairs) != len(members):
-                continue
-            score = float(np.sum((times[members] - grid_times) ** 2)) * penalty
-            if score < best_score - 1e-12:
-                best_score = score
-                best = slots, subdivision, quantized
+        instrument_members: dict[DrumInstrument, list[int]] = defaultdict(list)
+        for local_index, index in enumerate(members):
+            instrument_members[ordered[index].instrument].append(local_index)
+        for separate_collisions in (False, True):
+            if best is not None:
+                break
+            choices = [(8, SubdivisionType.THIRTY_SECOND, 1.15)] if separate_collisions else candidates
+            for slots, subdivision, penalty in choices:
+                rounded = np.rint(local * slots)
+                ticks = rounded.copy()
+                if separate_collisions:
+                    lower = max(0, int(np.ceil((position_at_zero - bar * numerator) * slots - 1e-9)))
+                    upper = min(numerator * slots - 1,
+                                int(np.floor((len(beats) - 1 - anchor - bar * numerator) * slots)))
+                    valid = True
+                    for local_indices in instrument_members.values():
+                        if len(local_indices) > upper - lower + 1:
+                            valid = False
+                            break
+                        assigned = np.clip(ticks[local_indices], lower, upper)
+                        for offset in range(1, len(assigned)):
+                            assigned[offset] = max(assigned[offset], assigned[offset - 1] + 1)
+                        assigned[-1] = min(assigned[-1], upper, rounded[local_indices[-1]] + 1)
+                        for offset in range(len(assigned) - 2, -1, -1):
+                            assigned[offset] = min(assigned[offset], assigned[offset + 1] - 1,
+                                                   rounded[local_indices[offset]] + 1)
+                        if assigned[0] < lower or np.any(np.abs(assigned - rounded[local_indices]) > 1):
+                            valid = False
+                            break
+                        ticks[local_indices] = assigned
+                    if not valid:
+                        continue
+                quantized = ticks / slots + bar * numerator
+                grid_coordinates = quantized + anchor
+                if np.any(grid_coordinates < 0) or np.any(grid_coordinates > len(beats) - 1):
+                    continue
+                grid_times = np.interp(grid_coordinates, np.arange(len(beats)), beats)
+                if np.any(grid_times < -1e-9):
+                    continue
+                pairs = {(ordered[index].instrument, round(float(position), 9))
+                         for index, position in zip(members, quantized, strict=True)}
+                if len(pairs) != len(members):
+                    continue
+                score = float(np.sum((times[members] - grid_times) ** 2)) * penalty
+                if score < best_score - 1e-12:
+                    best_score = score
+                    best = slots, subdivision, quantized
         if best is None:
             raise ValueError("Same-instrument hits cannot be represented on the supported grids without collision.")
         slots, subdivision, quantized = best
