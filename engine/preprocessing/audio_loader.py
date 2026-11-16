@@ -49,12 +49,37 @@ def _validate_decoded_audio(path: Path) -> None:
     )
 
 
+def _has_strong_stereo_phase_inversion(path: Path) -> bool:
+    """Detect strongly anti-correlated stereo before forming the mono model input."""
+    try:
+        with sf.SoundFile(path) as audio:
+            if audio.channels != 2:
+                return False
+            totals = np.zeros(6, dtype=np.float64)
+            for block in audio.blocks(blocksize=65536, dtype="float64", always_2d=True):
+                left, right = block.T
+                totals += (
+                    np.sum(left), np.sum(right), np.sum(left * left),
+                    np.sum(right * right), np.sum(left * right), len(block),
+                )
+    except (OSError, sf.SoundFileError) as error:
+        raise AudioPreprocessingError(f"Cannot analyze stereo phase in {path}: {error}") from error
+    count = totals[5]
+    left_variance = totals[2] - totals[0] ** 2 / count
+    right_variance = totals[3] - totals[1] ** 2 / count
+    if left_variance <= 1e-12 or right_variance <= 1e-12:
+        return False
+    covariance = totals[4] - totals[0] * totals[1] / count
+    return covariance / np.sqrt(left_variance * right_variance) < -0.5
+
+
 def prepare_audio_files(input_path: Path, output_dir: Path) -> PreparedAudioPaths:
     """Decode WAV, MP3, FLAC, or AIFF without normalization or automatic gain.
 
     The native copy is 24-bit PCM with the input rate/channel count. The analysis
-    copy is mono 44.1 kHz PCM16. FFmpeg's normal mono downmix may attenuate stereo
-    content; it is a fixed channel transform, never peak normalization. Existing
+    copy is mono 44.1 kHz PCM16. Strongly anti-correlated stereo is polarity-
+    corrected before downmixing to prevent cancellation; other stereo uses
+    FFmpeg's standard fixed downmix. No peak normalization is applied. Existing
     destination files are rejected. Failed decodes leave no partial final WAVs.
     A missing libsoxr implementation triggers exactly one standard-resampler retry.
     """
@@ -81,10 +106,12 @@ def prepare_audio_files(input_path: Path, output_dir: Path) -> PreparedAudioPath
                 "-c:a", "pcm_s24le", str(native),
             ])
             _validate_decoded_audio(native)
+            phase_corrected = _has_strong_stereo_phase_inversion(native)
+            downmix = ["pan=mono|c0=0.5*FL-0.5*FR"] if phase_corrected else []
             analysis_command = [
                 *common, "-i", str(native), "-map", "0:a:0", "-vn",
                 "-ac", "1", "-ar", "44100", "-af",
-                "aresample=resampler=soxr:precision=28",
+                ",".join([*downmix, "aresample=resampler=soxr:precision=28"]),
                 "-c:a", "pcm_s16le", str(analysis),
             ]
             try:
@@ -101,7 +128,10 @@ def prepare_audio_files(input_path: Path, output_dir: Path) -> PreparedAudioPath
                 )
                 if not unavailable:
                     raise
-                analysis_command[analysis_command.index("-af") + 1] = "aresample=resampler=swr"
+                filter_index = analysis_command.index("-af") + 1
+                analysis_command[filter_index] = analysis_command[filter_index].replace(
+                    "aresample=resampler=soxr:precision=28", "aresample=resampler=swr",
+                )
                 _decode(analysis_command)
             _validate_decoded_audio(analysis)
             native.replace(original_wav)

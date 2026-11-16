@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,9 @@ from pydantic import Field
 
 from engine.analysis.onset_refinement import AcousticEvidence, TOMS
 from engine.models.base import DetectedEvent, DrumInstrument
+
+
+logger = logging.getLogger(__name__)
 
 
 class FusedEvent(DetectedEvent):
@@ -76,6 +80,11 @@ def fuse_drum_events(
         raise ValueError("match_tolerance_ms must be finite and nonnegative.")
     if any(event.source != "adtof" for event in adtof_events) or any(event.source != "oaf" for event in oaf_events):
         raise ValueError("Input lists must contain events from their named model sources.")
+    unsupported = sum(event.instrument == DrumInstrument.UNKNOWN for event in [*adtof_events, *oaf_events])
+    if unsupported:
+        logger.debug("Discarded %d drum event(s) with unsupported instrument labels.", unsupported)
+        adtof_events = [event for event in adtof_events if event.instrument != DrumInstrument.UNKNOWN]
+        oaf_events = [event for event in oaf_events if event.instrument != DrumInstrument.UNKNOWN]
     if not adtof_events and not oaf_events:
         return []
     audio = AcousticEvidence(original_wav_path)

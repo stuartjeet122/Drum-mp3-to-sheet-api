@@ -10,6 +10,10 @@ it('maps General MIDI percussion to the visible drum kit', () => {
   expect(drumForNote(41)).toBe('floor');
   expect(drumForNote(49)).toBe('crash');
   expect(drumForNote(51)).toBe('ride');
+  expect(drumForNote(53)).toBe('ride');
+  expect(drumForNote(59)).toBe('ride');
+  expect(drumForNote(75)).toBeNull();
+  expect(drumForNote(39)).toBeNull();
 });
 
 it('provides a real timed demo sequence without submitting an API job', () => {

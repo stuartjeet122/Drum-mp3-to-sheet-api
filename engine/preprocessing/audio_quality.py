@@ -58,7 +58,7 @@ def analyze_audio_quality(original_wav: Path, analysis_wav: Path) -> AudioQualit
         if np.std(original[:, 0]) > 0 and np.std(original[:, 1]) > 0:
             correlation = float(np.clip(np.corrcoef(original[:, 0], original[:, 1])[0, 1], -1, 1))
             if correlation < -0.5:
-                diagnostics.append("Strong stereo phase inversion may cancel drums in the mono downmix.")
+                diagnostics.append("Strong stereo phase inversion detected; verify the mono model mix.")
         else:
             diagnostics.append("Stereo correlation is undefined because a channel is constant or silent.")
     del original

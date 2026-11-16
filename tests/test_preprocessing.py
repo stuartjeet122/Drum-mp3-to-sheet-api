@@ -84,6 +84,23 @@ def test_conversion_and_exact_native_levels(ffmpeg: str, drum_audio: Path, tmp_p
     assert ghost / strong == pytest.approx(0.035 / 0.65, abs=0.002)
 
 
+def test_anti_phase_stereo_is_polarity_corrected_for_model_audio(ffmpeg: str, tmp_path: Path) -> None:
+    """A phase-inverted drum stem must remain audible in the mono model input."""
+    sample_rate = 44100
+    time = np.arange(sample_rate) / sample_rate
+    mono = 0.35 * np.sin(2 * np.pi * 83 * time)
+    stereo = np.column_stack((mono, -mono))
+    source = tmp_path / "anti-phase.wav"
+    sf.write(source, stereo, sample_rate, subtype="PCM_24")
+
+    paths = prepare_audio_files(source, tmp_path / "job")
+    analysis, rate = sf.read(paths.analysis_wav)
+
+    assert rate == sample_rate
+    assert np.max(np.abs(analysis)) == pytest.approx(np.max(np.abs(mono)), abs=0.001)
+    assert np.corrcoef(analysis, mono)[0, 1] > 0.999
+
+
 @pytest.mark.parametrize("suffix,codec", [
     (".mp3", "libmp3lame"), (".flac", "flac"), (".aiff", "pcm_s24be"),
 ])

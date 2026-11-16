@@ -14,7 +14,8 @@ const instruments: { id: Drum; name: string; x: number; y: number; radius: numbe
   { id: 'kick', name: 'Kick', x: 408, y: 329, radius: 91 },
 ];
 
-export const DrumKit = forwardRef<DrumKitHandle, { onHit: (drum: Drum) => void }>(function DrumKit({ onHit }, ref) {
+export const DrumKit = forwardRef<DrumKitHandle, { onHit: (drum: Drum) => void; visibleDrums: Drum[] }>(
+  function DrumKit({ onHit, visibleDrums }, ref) {
   const [hits, setHits] = useState<Partial<Record<Drum, number>>>({});
   const versions = useRef<Partial<Record<Drum, number>>>({});
   const timers = useRef<Partial<Record<Drum, ReturnType<typeof setTimeout>>>>({});
@@ -42,7 +43,7 @@ export const DrumKit = forwardRef<DrumKitHandle, { onHit: (drum: Drum) => void }
   }
 
   return <div className="kit-scene">
-    <svg className="top-kit-svg" viewBox="0 0 680 430" role="group" aria-label="Interactive top view of an acoustic drum kit">
+    <svg className="top-kit-svg" viewBox="0 0 680 430" role="group" aria-label={`Interactive top view of an acoustic drum kit with ${visibleDrums.length} pieces`}>
       <defs>
         <radialGradient id="head-surface" cx="38%" cy="28%" r="76%">
           <stop offset="0" stopColor="#f4f4e9" />
@@ -76,7 +77,7 @@ export const DrumKit = forwardRef<DrumKitHandle, { onHit: (drum: Drum) => void }
         </pattern>
       </defs>
       <ellipse cx="340" cy="407" rx="270" ry="15" fill="#000" opacity=".2" />
-      {instruments.map(instrument => {
+      {instruments.filter(instrument => visibleDrums.includes(instrument.id)).map(instrument => {
         const version = hits[instrument.id] || 0;
         const active = version > 0;
         const { id, name, x, y, radius, cymbal } = instrument;
@@ -128,4 +129,5 @@ export const DrumKit = forwardRef<DrumKitHandle, { onHit: (drum: Drum) => void }
       <text className="kit-label" x="340" y="426">TOP VIEW · ACOUSTIC KIT</text>
     </svg>
   </div>;
-});
+  },
+);

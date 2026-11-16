@@ -78,6 +78,15 @@ def test_unbacked_oaf_false_positive_rejected(native_audio: Path, confidence: fl
     assert fuse_drum_events([], [false_hit], native_audio) == []
 
 
+def test_unknown_model_class_is_not_exported(native_audio: Path) -> None:
+    """Unmapped model classes cannot become fake rides or break notation exports."""
+    unsupported = DetectedEvent(
+        time_sec=0.4, instrument=DrumInstrument.UNKNOWN, midi_note=75,
+        confidence=0.99, source="oaf",
+    )
+    assert fuse_drum_events([], [unsupported], native_audio) == []
+
+
 def test_refinement_preserves_stereo_dynamics(native_audio: Path) -> None:
     """Opposite channel phases do not erase transients or ghost-note dynamics."""
     hits = [event(0.39, DrumInstrument.SNARE), event(2.09, DrumInstrument.SNARE)]

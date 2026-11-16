@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import MidiPackage from '@tonejs/midi';
+import { readFileSync } from 'node:fs';
 
 const { Midi } = MidiPackage;
+const voiceSample = readFileSync(new URL('../public/samples/drums/CrashA-001-Natural.mp3', import.meta.url));
 
 const id = '9d199c08-11bf-4c48-9a7a-aaef1f688531';
 const baseJob = {
@@ -19,6 +21,7 @@ function midiFile() {
     track.addNote({ midi: 42, time: index * 0.326, duration: 0.06, velocity: 0.5 });
     if (index % 2 === 0) track.addNote({ midi: index % 4 === 0 ? 36 : 38, time: index * 0.326, duration: 0.1, velocity: 0.8 });
   }
+  track.addNote({ midi: 75, time: 1.2, duration: 0.1, velocity: 0.5 });
   track.addNote({ midi: 38, time: 0.652, duration: 0.08, velocity: 0.5 });
   track.addNote({ midi: 46, time: 0.652, duration: 0.4, velocity: 0.65 });
   return Buffer.from(midi.toArray());
@@ -74,7 +77,7 @@ test('desktop studio renders a top-down kit and functional demo controls', async
   await expect(page.getByRole('button', { name: 'Add a recording' })).toBeVisible();
   await page.getByRole('link', { name: 'Play & score' }).click();
   await expect(page.getByRole('heading', { name: 'Play your score.' })).toBeVisible();
-  await expect(page.getByRole('group', { name: 'Interactive top view of an acoustic drum kit' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Interactive top view of an acoustic drum kit with 8 pieces' })).toBeVisible();
   await expect.poll(() => canvasColors(page, '.top-kit-svg')).toBeGreaterThan(45);
   await page.screenshot({ path: testInfo.outputPath('desktop-studio.png'), fullPage: true });
   await page.getByRole('button', { name: 'Play drums', exact: true }).click();
@@ -91,6 +94,30 @@ test('desktop studio renders a top-down kit and functional demo controls', async
   await page.getByRole('button', { name: 'Snare', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Snare', exact: true })).toHaveClass(/is-hit/);
   expect(errors).toEqual([]);
+});
+
+test('optional MP3 voice stem stays local and follows playback transport', async ({ page }) => {
+  await fixtures(page, []);
+  const uploads: string[] = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/transcriptions')) uploads.push(request.url());
+  });
+  await page.goto('./');
+  await page.getByRole('link', { name: 'Play & score' }).click();
+  await page.getByLabel('Choose voice stem MP3').setInputFiles({ name: 'voice.wav', mimeType: 'audio/wav', buffer: voiceSample });
+  await expect(page.getByRole('alert')).toHaveText('Choose an MP3 voice stem.');
+  await page.getByLabel('Choose voice stem MP3').setInputFiles({ name: 'voice.mp3', mimeType: 'audio/mpeg', buffer: voiceSample });
+  await expect(page.getByText(/READY TO PLAY/)).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Play drums', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause playback', exact: true })).toBeVisible();
+  await expect.poll(async () => Number(await page.getByRole('slider', { name: 'Playback position' }).inputValue())).toBeGreaterThan(0.3);
+  await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
+  await page.getByRole('button', { name: 'Restart playback' }).click();
+  await expect(page.getByRole('slider', { name: 'Playback position' })).toHaveValue('0');
+  await page.getByRole('button', { name: 'Play drums', exact: true }).click();
+  await expect.poll(async () => Number(await page.getByRole('slider', { name: 'Playback position' }).inputValue())).toBeGreaterThan(0.2);
+  expect(uploads).toEqual([]);
 });
 
 test('upload starts once, polls real stages, and displays downloadable PDF/MIDI/XML', async ({ page }, testInfo) => {
@@ -110,6 +137,9 @@ test('upload starts once, polls real stages, and displays downloadable PDF/MIDI/
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '65');
   await expect(page.getByRole('heading', { name: 'Your groove, on paper.' })).toBeVisible();
   await page.getByRole('link', { name: 'Play & view score' }).click();
+  await expect(page.getByText('DETECTED / 3-PIECE')).toBeVisible();
+  await expect(page.locator('.kit-instrument')).toHaveCount(3);
+  await expect(page.locator('.drum-pad')).toHaveCount(3);
   await expect(page.getByRole('link', { name: 'MusicXML', exact: true })).toHaveAttribute('href', /export\/musicxml$/);
   await expect(page.getByRole('link', { name: 'MIDI', exact: true })).toHaveAttribute('href', /export\/midi$/);
   await expect(page.getByRole('img', { name: 'Drum sheet music, page 1' })).toBeVisible();

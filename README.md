@@ -16,7 +16,8 @@ retains version ranges for development.
 
 [Backbeat](frontend/README.md) is the dark-mode web interface: audio upload,
 live transcription progress, an embedded PDF score, MIDI/MusicXML downloads,
-and a sample-based top-view drum player driven by the exported MIDI. Run `npm ci` and
+and a sample-based top-view drum player with optional local MP3 voice playback.
+Run `npm ci` and
 `npm run dev` from `frontend/`, then open
 http://127.0.0.1:5173/drum-studio/.
 The frontend deployment instructions preserve the existing API and Portainer
@@ -385,9 +386,10 @@ print(report.model_dump_json(indent=2))
 Use a unique output directory per job; existing final WAVs are not overwritten.
 The native-rate/channel copy uses PCM24; conversion never peak-normalizes,
 compresses, or applies automatic gain. PCM encoding and resampling introduce
-their normal quantization error. The analysis copy uses a fixed mono downmix
-and 44.1 kHz PCM16. Phase-inverted stereo channels can cancel when mixed;
-a completely silent mono result is rejected rather than boosted.
+their normal quantization error. The analysis copy uses mono 44.1 kHz PCM16.
+Strongly anti-correlated stereo is polarity-corrected before downmixing to
+prevent phase cancellation; other stereo uses FFmpeg's standard fixed downmix.
+A completely silent result is rejected rather than boosted.
 
 Peak/RMS/crest and stereo correlation come from the native copy; spectral
 features and unpadded frame-level percentiles come from the analysis copy.

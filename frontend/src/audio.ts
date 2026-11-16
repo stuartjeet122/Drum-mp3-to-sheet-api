@@ -40,7 +40,11 @@ export class DrumAudio {
   private openHat: Tone.Player | null = null;
   private output = new Tone.Volume(-6).toDestination();
   private limiter = new Tone.Limiter(-1.5).connect(this.output);
-  private players = new Tone.Players(sampleUrls, { fadeOut: 0.035 }).connect(this.limiter);
+  private drumChannel = new Tone.Volume(0).connect(this.limiter);
+  private voiceChannel = new Tone.Volume(-4).connect(this.limiter);
+  private players = new Tone.Players(sampleUrls, { fadeOut: 0.035 }).connect(this.drumChannel);
+  private voicePlayer: Tone.Player | null = null;
+  private voiceLoadId = 0;
 
   async unlock() {
     await Tone.start();
@@ -48,7 +52,43 @@ export class DrumAudio {
   }
 
   now() { return Tone.now(); }
-  mute(value: boolean) { this.output.mute = value; }
+  mute(value: boolean) { this.drumChannel.mute = value; }
+
+  async loadVoice(url: string | null): Promise<number | null> {
+    const loadId = ++this.voiceLoadId;
+    this.voicePlayer?.stop();
+    this.voicePlayer?.dispose();
+    this.voicePlayer = null;
+    if (!url) return null;
+
+    const player = new Tone.Player({ fadeOut: 0.035 }).connect(this.voiceChannel);
+    try {
+      await player.load(url);
+    } catch (error) {
+      player.dispose();
+      throw error;
+    }
+    if (loadId !== this.voiceLoadId) {
+      player.dispose();
+      return null;
+    }
+    this.voicePlayer = player;
+    return player.buffer.duration;
+  }
+
+  voiceRate(rate: number) {
+    if (this.voicePlayer) this.voicePlayer.playbackRate = rate;
+  }
+
+  playVoice(time: number, offset: number) {
+    this.voicePlayer?.start(time, offset);
+  }
+
+  restartVoice(time: number, offset: number) {
+    if (!this.voicePlayer) return;
+    this.voicePlayer.stop(time);
+    this.voicePlayer.start(time + 0.01, offset);
+  }
 
   private play(group: SampleGroup, time: number): Tone.Player {
     const files = sampleGroups[group];
@@ -63,6 +103,7 @@ export class DrumAudio {
     const velocity = Math.max(0.05, Math.min(1, hit.velocity));
     const level = velocity < 0.4 ? 'Soft' : velocity < 0.76 ? 'Medium' : 'Hard';
     const drum = drumForNote(hit.midi);
+    if (!drum) return;
     time = Math.max(time, (this.lastHits.get(drum) ?? -Infinity) + 0.001);
     this.lastHits.set(drum, time);
 
@@ -89,6 +130,7 @@ export class DrumAudio {
 
   stop() {
     this.players.stopAll();
+    this.voicePlayer?.stop();
     this.openHat = null;
   }
 }

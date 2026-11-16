@@ -43,13 +43,19 @@ deployment is recommended, especially behind an authenticated reverse proxy.
   A missing optional PDF does not hide the other formats.
 - The exported MIDI drives a sample-based acoustic kit and a top-down
   illustration with per-hit impact ripples. Kick and snare use soft, medium,
-  and hard layers; other drums use round-robin variations. Play/pause, restart,
-  seek, loop, mute and speed controls are local;
+  and hard layers; other drums use round-robin variations. A score shows only
+  the supported drum parts present in its MIDI. Unrecognized pitches are not
+  misplayed as rides. Play/pause, restart, seek, loop, mute and speed controls are local;
   they do not submit processing jobs. The built-in groove is explicitly a demo.
+- On the Play & score page, optionally add a separate MP3 vocal stem. It follows
+  the drum player's play, pause, seek, loop and speed controls. The vocal file is
+  decoded and played locally in the browser; it is not sent to the transcription
+  API or stored after the page is closed.
 
 The current API expects an **isolated drum stem**. This frontend does not add
-source separation for mixed songs. The top-down kit is a simplified eight-piece
-GM percussion visualization, not a promise of instrument-detection accuracy.
+source separation for mixed songs. The top-down kit uses the supported General
+MIDI drum parts present in the score; model predictions still depend on the
+recording and are not a guarantee of perfect instrument detection.
 Playback uses a compact subset of DrumThrash's DT-Natural free drum recordings;
 see `public/samples/drums/CREDITS.txt` for the source and included usage note.
 
@@ -120,7 +126,8 @@ Browser tests use installed Google Chrome by default. For Edge set
 `PLAYWRIGHT_CHANNEL=msedge`; for bundled Chromium install it with
 `npx playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`.
 Tests mock the management API and never submit real inference jobs. They cover
-upload/start/poll/completion, queue retries, MIDI parsing and playback controls,
+upload/start/poll/completion, queue retries, local MP3 voice-stem playback,
+MIDI parsing and playback controls,
 PDF rendering and mobile zoom, session restoration, export links, and responsive
 top-down kit rendering at 320, 390, 768 and 1440 pixels. Screenshots are saved under
 the ignored `test-results/` directory.

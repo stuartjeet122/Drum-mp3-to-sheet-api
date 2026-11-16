@@ -13,15 +13,16 @@ export const drums: { id: Drum; name: string; color: string; note: number }[] = 
   { id: 'ride', name: 'Ride', color: '#c4aa7a', note: 51 },
 ];
 
-export function drumForNote(note: number): Drum {
+export function drumForNote(note: number): Drum | null {
   if ([35, 36].includes(note)) return 'kick';
-  if ([37, 38, 39, 40].includes(note)) return 'snare';
+  if ([37, 38, 40].includes(note)) return 'snare';
   if ([42, 44, 46].includes(note)) return 'hihat';
   if ([48, 50].includes(note)) return 'tom1';
   if ([45, 47].includes(note)) return 'tom2';
   if ([41, 43].includes(note)) return 'floor';
   if ([49, 52, 55, 57].includes(note)) return 'crash';
-  return 'ride';
+  if ([51, 53, 59].includes(note)) return 'ride';
+  return null;
 }
 
 export function demoGroove(): Sequence {
@@ -46,7 +47,8 @@ export async function readMidi(buffer: ArrayBuffer): Promise<Sequence> {
     ? midi.tracks.filter(track => track.channel === 9) : midi.tracks;
   const hits = tracks.flatMap(track => track.notes.map(note => ({
     time: note.time, duration: note.duration, midi: note.midi, velocity: note.velocity,
-  }))).sort((left, right) => left.time - right.time);
+  }))).filter(hit => drumForNote(hit.midi) !== null)
+    .sort((left, right) => left.time - right.time);
   if (!hits.length) throw new Error('This MIDI contains no playable drum notes.');
   return { hits, duration: Math.max(midi.duration, hits[hits.length - 1].time + 0.5), bpm: midi.header.tempos[0]?.bpm || 120 };
 }
