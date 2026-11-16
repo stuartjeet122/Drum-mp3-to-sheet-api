@@ -111,6 +111,42 @@ def test_oaf_chunk_ownership_and_mapping(
     engine.release()
 
 
+@pytest.mark.parametrize("raw_velocity, expected", [
+    (-0.2, 1), (0.0, 1), (0.5, 63), (1.0, 127), (1.2, 127),
+    (np.finfo(np.float32).max, 127),
+])
+def test_oaf_clips_finite_velocities_before_midi_conversion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, waveform: Path,
+    raw_velocity: float, expected: int,
+) -> None:
+    engine, _, session = fake_ort(monkeypatch, tmp_path)
+    probabilities = np.zeros((1, 1001, 8), dtype=np.float32)
+    probabilities[0, 100, 0] = 0.9
+    velocities = np.full_like(probabilities, raw_velocity)
+    original = velocities.copy()
+    session.run.return_value = [probabilities, velocities]
+    events = run_model_isolated(engine, waveform)
+    assert len(events) == 3
+    assert all(event.velocity == expected for event in events)
+    np.testing.assert_array_equal(velocities, original)
+    assert engine.session is None
+
+
+@pytest.mark.parametrize("invalid", ["shape", "nan", "inf", "negative_inf"])
+def test_oaf_rejects_malformed_velocities(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, waveform: Path, invalid: str,
+) -> None:
+    engine, _, session = fake_ort(monkeypatch, tmp_path)
+    probabilities = np.zeros((1, 1001, 8), dtype=np.float32)
+    velocities = np.zeros((1, 1000 if invalid == "shape" else 1001, 8), dtype=np.float32)
+    if invalid != "shape":
+        velocities[0, 0, 0] = {"nan": np.nan, "inf": np.inf, "negative_inf": -np.inf}[invalid]
+    session.run.return_value = [probabilities, velocities]
+    with pytest.raises(ModelInferenceError, match="Model velocities"):
+        run_model_isolated(engine, waveform)
+    assert engine.session is None
+
+
 def test_adtof_cpu_mapping(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Use upstream frontend/model APIs without importing or installing Torch."""
     audio = tmp_path / "analysis.wav"

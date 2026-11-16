@@ -195,7 +195,7 @@ def pick_events(
     """Peak-pick 100 FPS probabilities, keeping only the window's owned region.
 
     Flat peaks produce one midpoint hit; endpoints are eligible. OaF velocities
-    are normalized [0, 1] and converted using its published int(v * 127) rule.
+    follow its published int(clip(v, 0, 1) * 127) rule, with MIDI minimum one.
     """
     expected_frames = len(window.samples) // 441 + 1
     if probabilities.shape != (1, expected_frames, len(pitches)):
@@ -207,9 +207,8 @@ def pick_events(
         raise ModelInferenceError("Model onset outputs must be finite probabilities in [0, 1].")
     if velocities is not None and (
         velocities.shape != probabilities.shape or not np.isfinite(velocities).all()
-        or np.any((velocities < 0) | (velocities > 1))
     ):
-        raise ModelInferenceError("Model velocities must match onset shape and be finite values in [0, 1].")
+        raise ModelInferenceError("Model velocities must match onset shape and be finite values.")
     events: list[DetectedEvent] = []
     for class_index, (pitch, threshold) in enumerate(zip(pitches, thresholds, strict=True)):
         track = probabilities[0, :, class_index]
@@ -219,7 +218,7 @@ def pick_events(
             if not window.owned_start_sec <= time_sec < window.owned_end_sec:
                 continue
             velocity = 90 if velocities is None else max(
-                1, min(127, int(float(velocities[0, frame, class_index]) * 127))
+                1, int(float(np.clip(velocities[0, frame, class_index], 0, 1)) * 127)
             )
             events.append(DetectedEvent(
                 time_sec=time_sec,
