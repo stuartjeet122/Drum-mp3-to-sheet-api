@@ -20,6 +20,9 @@
     "react-dom": "^19.2.0",
     "tone": "14.8.49"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "@types/node": "^22.0.0",
