@@ -223,3 +223,11 @@ body{background-image:radial-gradient(ellipse at 50% -18%,#1d2931 0,transparent 
   .notation-section-row>.icon-button{grid-column:4;grid-row:1}
   .notation-sections-heading{align-items:flex-start}
 }
+
+.kit-instrument.is-hit{filter:drop-shadow(0 0 14px #8bdfff)}
+.kit-drum.is-hit .drum-head{fill:#f4fbff;stroke:#fff;stroke-width:4}
+.kit-drum.is-hit .drum-rim{stroke:#a8e8ff;stroke-width:4}
+.kit-cymbal.is-hit .cymbal-disc{fill:#c8f3ff;stroke:#fff;stroke-width:3}
+.drum-pad.is-hit{background:color-mix(in srgb,var(--pad-color) 28%,transparent);box-shadow:0 0 12px color-mix(in srgb,var(--pad-color) 45%,transparent);transform:translateY(-2px)}
+.practice-help{margin:9px 0 0;color:#8296a3;font-size:9px;line-height:1.6}
+.notation-playing-help{margin:-7px 0 15px;color:#8296a3;font-size:9px;line-height:1.6}

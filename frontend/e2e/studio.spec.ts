@@ -97,12 +97,15 @@ test('desktop studio renders a top-down kit and functional demo controls', async
   await page.getByRole('combobox', { name: 'Playback speed' }).selectOption('0.75');
   await page.getByRole('button', { name: 'Snare', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Snare', exact: true })).toHaveClass(/is-hit/);
+  await expect(page.locator('.kit-instrument.is-hit')).toHaveCSS('filter', /drop-shadow/);
   await page.getByText('Independent mixer', { exact: true }).click();
   const drumVolume = page.getByRole('slider', { name: 'Drum volume' });
   await expect(drumVolume).toHaveValue('100');
   await drumVolume.press('ArrowLeft');
   await expect(drumVolume).toHaveValue('99');
   await page.getByText('Humanize playback', { exact: true }).click();
+  await expect(page.getByText(/Give playback a less mechanical feel: swing delays alternating eighth notes/)).toBeVisible();
+  await expect(page.getByText(/To learn this transcription, slow it down with Playback speed above/)).toBeVisible();
   const swing = page.getByRole('slider', { name: 'Swing' });
   await swing.press('ArrowRight');
   await expect(swing).toHaveValue('1');
@@ -228,6 +231,7 @@ test('notation controls submit rich markings and rebuild options for the selecte
   });
   await page.goto(`./?page=play#job=${id}`);
   await expect(page.getByRole('heading', { name: 'Notation & drum layout' })).toBeVisible();
+  await expect(page.getByText(/Turn on R\/L sticking to add alternating hand cues/)).toBeVisible();
   await page.getByLabel('R/L sticking').check();
   await page.getByLabel('Measures per system').selectOption('3');
   await page.getByRole('button', { name: 'Add section' }).click();

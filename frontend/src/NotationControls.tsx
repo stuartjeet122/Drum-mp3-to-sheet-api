@@ -55,6 +55,7 @@ export default function NotationControls({ job, onJobChange }: {
       <label className="notation-field">Accent from velocity<input type="number" min="1" max="127" value={options.accent_threshold} onChange={event => setOptions(current => ({ ...current, accent_threshold: Math.max(1, Math.min(127, Number(event.target.value) || 1)) }))} /></label>
       <label className="notation-field">Measures per system<select value={options.measures_per_system} onChange={event => setOptions(current => ({ ...current, measures_per_system: Number(event.target.value) }))}>{[2, 3, 4, 5, 6, 8].map(value => <option key={value} value={value}>{value} measures</option>)}</select></label>
     </div>
+    <p className="notation-playing-help">Turn on R/L sticking to add alternating hand cues to the score and make the rhythm easier to learn and play.</p>
     <div className="notation-sections-heading"><div><strong>Sections &amp; repeats</strong><span>Label a range of bars and optionally add repeat signs.</span></div><button className="secondary-button" onClick={() => setOptions(current => ({ ...current, sections: [...current.sections, { start_measure: 1, end_measure: Math.min(4, measureCount), label: 'Section', repeat: false }] }))} disabled={saving}><Plus size={14} />Add section</button></div>
     {options.sections.length > 0 && <div className="notation-section-list">{options.sections.map((section, index) => <div className="notation-section-row" key={index}>
       <label>From<input type="number" min="1" max={measureCount} value={section.start_measure} onChange={event => {

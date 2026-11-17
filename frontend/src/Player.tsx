@@ -446,11 +446,12 @@ export default function Player({
           <label className="range-control"><span>Timing feel<output>{timingMs} ms</output></span><input type="range" min="0" max="30" value={timingMs} onChange={event => setTimingMs(Number(event.target.value))} aria-label="Timing feel" /></label>
           <label className="range-control"><span>Velocity variation<output>{velocityPercent}%</output></span><input type="range" min="0" max="40" value={velocityPercent} onChange={event => setVelocityPercent(Number(event.target.value))} aria-label="Velocity variation" /></label>
           <label className="range-control"><span>Quantization strength<output>{quantizePercent}%</output></span><input type="range" min="0" max="100" value={quantizePercent} onChange={event => setQuantizePercent(Number(event.target.value))} aria-label="Quantization strength" /></label>
-          <p>These controls affect playback only. Your original transcription and exports stay unchanged.</p>
+          <p>Give playback a less mechanical feel: swing delays alternating eighth notes, timing adds small shifts, velocity varies hit strength, and quantization pulls hits toward a 16th-note grid. Your transcription and exports stay unchanged.</p>
         </div>
       </details>
       <section className="player-tool practice-tool" aria-label="Practice mode">
         <h3><Repeat2 size={15} />Practice section</h3>
+        <p className="practice-help">To learn this transcription, slow it down with Playback speed above, choose a bar range, then start the loop. Count-in gives you a beat before each pass.</p>
         <div className="practice-range">
           <label>Start bar<input type="number" min="1" max={measureCount} value={sectionStart}
             onChange={event => setSectionStart(Math.max(1, Math.min(measureCount, Number(event.target.value) || 1)))} /></label>
